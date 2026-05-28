@@ -1,0 +1,561 @@
+@page "/cartable"
+@rendermode InteractiveServer
+@using System.Text.Json
+@using WorkflowRBC.Blazor.Models
+@using WorkflowRBC.Blazor.Services
+@inject WorkflowApiClient Api
+@inject IConfiguration Configuration
+
+<PageTitle>Cartable</PageTitle>
+
+<main class="workflow-console">
+    <div class="page-header">
+        <div>
+            <h1>Cartable</h1>
+            <p>API: @ApiBaseUrl</p>
+        </div>
+        <button class="btn btn-outline-primary" @onclick="LoadCartableAsync" disabled="@IsBusy">Refresh</button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <div class="alert @StatusCss" role="alert">@StatusMessage</div>
+    }
+
+    <section class="tool-section">
+        <div class="section-title">
+            <h2>Pending Steps</h2>
+            <span>@CartableItems.Count item(s)</span>
+        </div>
+
+        <div class="form-grid compact">
+            <label>
+                User id
+                <input class="form-control" type="number" @bind="UserId" />
+            </label>
+            <div class="action-row">
+                <button class="btn btn-primary" @onclick="LoadCartableAsync" disabled="@IsBusy">Load pending steps</button>
+            </div>
+        </div>
+
+        <div class="table-responsive mt-3">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Instance</th>
+                        <th>Process</th>
+                        <th>Title</th>
+                        <th>Step</th>
+                        <th>Started</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var item in CartableItems)
+                    {
+                        <tr class="selectable-row @(item.ProcessInstanceStepId == SelectedCartableStepId ? "selected-row" : "")"
+                            @onclick="() => SelectCartableItemAsync(item)">
+                            <td>@item.ProcessInstanceId</td>
+                            <td>@item.ProcessCode - @item.ProcessName</td>
+                            <td>@item.Title</td>
+                            <td><span class="state-pill">@item.StepName</span></td>
+                            <td>@(item.StartedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    @if (SelectedInstance is not null)
+    {
+        <section class="tool-section">
+            <div class="section-title">
+                <h2>Instance #@SelectedInstance.Id</h2>
+                <span>@SelectedInstance.Title</span>
+            </div>
+
+            <div class="instance-workspace">
+                <div>
+                    <h3>@DataTypeLabel(SelectedInstanceDataType)</h3>
+                    <div class="form-grid edit-grid">
+                        @if (SelectedInstanceDataType == WorkflowDataTypes.LeaveRequest)
+                        {
+                            @LeaveRequestForm(SelectedLeaveData)
+                        }
+                        else if (SelectedInstanceDataType == WorkflowDataTypes.PurchaseRequest)
+                        {
+                            @PurchaseRequestForm(SelectedPurchaseData)
+                        }
+                        else
+                        {
+                            <p class="muted span-2">This data type is not supported in the test UI yet.</p>
+                        }
+                    </div>
+                    <div class="action-row">
+                        @if (SelectedInstanceDataType == WorkflowDataTypes.LeaveRequest)
+                        {
+                            <button class="btn btn-outline-secondary" @onclick="RecalculateSelectedLeaveDays">Calculate days</button>
+                        }
+                        else if (SelectedInstanceDataType == WorkflowDataTypes.PurchaseRequest)
+                        {
+                            <button class="btn btn-outline-secondary" @onclick="RecalculateSelectedPurchaseTotal">Calculate total</button>
+                        }
+                        <button class="btn btn-primary" @onclick="SaveSelectedDataAsync" disabled="@(!CanUpdateSelectedData)">Update data</button>
+                    </div>
+                </div>
+
+                <div>
+                    <h3>Current Step</h3>
+                    <div class="timeline">
+                        @foreach (var step in SelectedInstance.Steps.OrderBy(s => s.Id))
+                        {
+                            <div class="timeline-item @(step.State == ProcessInstanceStepState.Active ? "active-step" : "")">
+                                <strong>@StepName(SelectedProcess, step.ProcessStepId)</strong>
+                                <span>@step.State</span>
+                                @if (!string.IsNullOrWhiteSpace(step.Comments))
+                                {
+                                    <small>@step.Comments</small>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <div class="action-panel">
+                        <label>
+                            Available action
+                            <select class="form-select" @bind="SelectedAction">
+                                @foreach (var action in AvailableActionsForSelectedInstance)
+                                {
+                                    <option value="@action.Action">@action.DisplayName (@action.Action)</option>
+                                }
+                            </select>
+                        </label>
+                        <label>
+                            Step comment
+                            <textarea class="form-control" rows="3" maxlength="2000" @bind="StepComment"></textarea>
+                        </label>
+                        <button class="btn btn-warning" @onclick="ExecuteActionAsync" disabled="@(!CanExecuteAction)">Act on current step</button>
+                    </div>
+
+                    <h3>History</h3>
+                    @if (SelectedInstance.History.Count == 0)
+                    {
+                        <p class="muted">No history yet.</p>
+                    }
+                    else
+                    {
+                        <ul class="history-list">
+                            @foreach (var item in SelectedInstance.History.OrderBy(h => h.PerformedAt))
+                            {
+                                <li>@item.PerformedAt.ToLocalTime(): @item.Action from @item.FromState to @item.ToState @item.Comments</li>
+                            }
+                        </ul>
+                    }
+                </div>
+            </div>
+        </section>
+    }
+</main>
+
+@code {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private List<CartableItemDto> CartableItems { get; set; } = new();
+    private List<ProcessDataTypeDto> ProcessDataTypes { get; set; } = new();
+    private ProcessDto? SelectedProcess { get; set; }
+    private ProcessInstanceDto? SelectedInstance { get; set; }
+    private LeaveRequestDataDto SelectedLeaveData { get; set; } = NewLeaveData();
+    private PurchaseRequestDataDto SelectedPurchaseData { get; set; } = NewPurchaseData();
+    private string ApiBaseUrl => Configuration["WorkflowApi:BaseUrl"] ?? "http://localhost:5246";
+    private string SelectedInstanceDataType { get; set; } = WorkflowDataTypes.LeaveRequest;
+    private string StepComment { get; set; } = "";
+    private int UserId { get; set; } = 1;
+    private int SelectedCartableStepId { get; set; }
+    private WorkflowAction SelectedAction { get; set; } = WorkflowAction.Submit;
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = "";
+    private string StatusCss { get; set; } = "alert-info";
+
+    private IEnumerable<ProcessStepActionDto> AvailableActionsForSelectedInstance
+    {
+        get
+        {
+            if (SelectedInstance is null || SelectedProcess is null)
+                return Enumerable.Empty<ProcessStepActionDto>();
+
+            var activeStep = SelectedInstance.Steps.FirstOrDefault(s => s.State == ProcessInstanceStepState.Active);
+            if (activeStep is null)
+                return Enumerable.Empty<ProcessStepActionDto>();
+
+            return SelectedProcess.StepActions
+                .Where(a => a.IsActive && a.FromStepId == activeStep.ProcessStepId)
+                .ToList();
+        }
+    }
+
+    private bool CanExecuteAction =>
+        !IsBusy &&
+        SelectedInstance is not null &&
+        AvailableActionsForSelectedInstance.Any() &&
+        !string.IsNullOrWhiteSpace(StepComment);
+
+    private bool CanUpdateSelectedData =>
+        !IsBusy &&
+        SelectedInstance is not null &&
+        IsSupportedDataType(SelectedInstanceDataType);
+
+    private RenderFragment LeaveRequestForm(LeaveRequestDataDto model) => @<text>
+        <label>
+            Leave type
+            <input class="form-control" @bind="model.LeaveType" />
+        </label>
+        <label>
+            Backup person id
+            <input class="form-control" type="number" @bind="model.BackupPersonId" />
+        </label>
+        <label>
+            Start date
+            <input class="form-control" type="date" @bind="model.StartDate" @bind:format="yyyy-MM-dd" />
+        </label>
+        <label>
+            End date
+            <input class="form-control" type="date" @bind="model.EndDate" @bind:format="yyyy-MM-dd" />
+        </label>
+        <label>
+            Total days
+            <input class="form-control" type="number" @bind="model.TotalDays" />
+        </label>
+        <label class="check-line">
+            <input class="form-check-input" type="checkbox" @bind="model.IsEmergency" />
+            Emergency
+        </label>
+        <label class="span-2">
+            Contact during leave
+            <input class="form-control" @bind="model.ContactDuringLeave" />
+        </label>
+        <label class="span-2">
+            Reason
+            <textarea class="form-control" rows="3" @bind="model.Reason"></textarea>
+        </label>
+    </text>;
+
+    private RenderFragment PurchaseRequestForm(PurchaseRequestDataDto model) => @<text>
+        <label class="span-2">
+            Item description
+            <input class="form-control" @bind="model.ItemDescription" />
+        </label>
+        <label>
+            Category
+            <input class="form-control" @bind="model.Category" />
+        </label>
+        <label>
+            Budget code
+            <input class="form-control" @bind="model.BudgetCode" />
+        </label>
+        <label>
+            Quantity
+            <input class="form-control" type="number" @bind="model.Quantity" />
+        </label>
+        <label>
+            Unit price
+            <input class="form-control" type="number" step="0.01" @bind="model.UnitPrice" />
+        </label>
+        <label>
+            Total amount
+            <input class="form-control" type="number" step="0.01" @bind="model.TotalAmount" />
+        </label>
+        <label>
+            Required by
+            <input class="form-control" type="date" @bind="model.RequiredByDate" @bind:format="yyyy-MM-dd" />
+        </label>
+        <label>
+            Vendor name
+            <input class="form-control" @bind="model.VendorName" />
+        </label>
+        <label>
+            Vendor contact
+            <input class="form-control" @bind="model.VendorContact" />
+        </label>
+        <label class="check-line">
+            <input class="form-check-input" type="checkbox" @bind="model.IsUrgent" />
+            Urgent
+        </label>
+        <label class="span-2">
+            Justification
+            <textarea class="form-control" rows="3" @bind="model.Justification"></textarea>
+        </label>
+    </text>;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadReferenceDataAsync();
+        await LoadCartableAsync();
+    }
+
+    private async Task LoadReferenceDataAsync()
+    {
+        var dataTypes = await Api.GetProcessDataTypesAsync();
+        if (dataTypes.Succeeded && dataTypes.Value is not null)
+            ProcessDataTypes = dataTypes.Value;
+
+        if (ProcessDataTypes.Count == 0)
+        {
+            ProcessDataTypes =
+            [
+                new ProcessDataTypeDto { Code = WorkflowDataTypes.LeaveRequest, DisplayName = "Leave request", EntityType = "LeaveRequestData" },
+                new ProcessDataTypeDto { Code = WorkflowDataTypes.PurchaseRequest, DisplayName = "Purchase request", EntityType = "PurchaseRequestData" }
+            ];
+        }
+    }
+
+    private async Task LoadCartableAsync()
+    {
+        await RunAsync("Loaded pending steps.", async () =>
+        {
+            var result = await Api.GetCartableAsync(UserId);
+            if (!result.Succeeded || result.Value is null)
+                return result.Message;
+
+            CartableItems = result.Value;
+            if (SelectedCartableStepId != 0 && !CartableItems.Any(i => i.ProcessInstanceStepId == SelectedCartableStepId))
+                ClearSelection();
+
+            return null;
+        });
+    }
+
+    private async Task SelectCartableItemAsync(CartableItemDto item)
+    {
+        await RunAsync("Loaded selected step.", async () =>
+        {
+            SelectedCartableStepId = item.ProcessInstanceStepId;
+
+            var instanceResult = await Api.GetInstanceAsync(item.ProcessInstanceId);
+            if (!instanceResult.Succeeded || instanceResult.Value is null)
+                return instanceResult.Message;
+
+            SelectedInstance = instanceResult.Value;
+
+            var processResult = await Api.GetProcessAsync(SelectedInstance.ProcessId);
+            if (!processResult.Succeeded || processResult.Value is null)
+                return processResult.Message;
+
+            SelectedProcess = processResult.Value;
+            StepComment = "";
+            await LoadSelectedDataAsync(SelectedInstance.Id);
+            SyncSelectedAction();
+            return null;
+        });
+    }
+
+    private async Task LoadSelectedDataAsync(int instanceId)
+    {
+        var data = await Api.GetInstanceDataJsonAsync(instanceId);
+        if (!data.Succeeded || string.IsNullOrWhiteSpace(data.Value))
+            return;
+
+        using var document = JsonDocument.Parse(data.Value);
+        SelectedInstanceDataType = document.RootElement.GetProperty("dataType").GetString()
+            ?? WorkflowDataTypes.LeaveRequest;
+
+        switch (SelectedInstanceDataType)
+        {
+            case WorkflowDataTypes.LeaveRequest:
+                SelectedLeaveData = JsonSerializer.Deserialize<LeaveRequestDataDto>(data.Value, JsonOptions) ?? NewLeaveData();
+                break;
+            case WorkflowDataTypes.PurchaseRequest:
+                SelectedPurchaseData = JsonSerializer.Deserialize<PurchaseRequestDataDto>(data.Value, JsonOptions) ?? NewPurchaseData();
+                break;
+        }
+    }
+
+    private async Task SaveSelectedDataAsync()
+    {
+        await RunAsync("Instance data updated.", async () =>
+        {
+            if (SelectedInstance is null)
+                return "Select a pending step first.";
+
+            string? error = SelectedInstanceDataType switch
+            {
+                WorkflowDataTypes.LeaveRequest => await SaveLeaveRequestDataAsync(),
+                WorkflowDataTypes.PurchaseRequest => await SavePurchaseRequestDataAsync(),
+                _ => $"Unsupported data type: {SelectedInstanceDataType}"
+            };
+
+            if (!string.IsNullOrWhiteSpace(error))
+                return error;
+
+            await LoadSelectedDataAsync(SelectedInstance.Id);
+            return null;
+        });
+    }
+
+    private async Task ExecuteActionAsync()
+    {
+        await RunAsync($"Executed {SelectedAction}.", async () =>
+        {
+            if (SelectedInstance is null)
+                return "Select a pending step first.";
+
+            var result = await Api.ExecuteActionAsync(SelectedInstance.Id, SelectedAction, StepComment, UserId);
+            if (!result.Succeeded || result.Value is null)
+                return result.Message;
+
+            SelectedInstance = result.Value;
+            StepComment = "";
+            await LoadSelectedDataAsync(result.Value.Id);
+            SyncSelectedAction();
+            await LoadCartableAsync();
+            return null;
+        });
+    }
+
+    private async Task<string?> SaveLeaveRequestDataAsync()
+    {
+        PrepareLeaveData(SelectedLeaveData);
+        var result = await Api.UpsertLeaveRequestDataAsync(SelectedInstance!.Id, SelectedLeaveData, UserId);
+        if (!result.Succeeded || result.Value is null)
+            return result.Message;
+
+        SelectedLeaveData = result.Value;
+        return null;
+    }
+
+    private async Task<string?> SavePurchaseRequestDataAsync()
+    {
+        PreparePurchaseData(SelectedPurchaseData);
+        var result = await Api.UpsertPurchaseRequestDataAsync(SelectedInstance!.Id, SelectedPurchaseData, UserId);
+        if (!result.Succeeded || result.Value is null)
+            return result.Message;
+
+        SelectedPurchaseData = result.Value;
+        return null;
+    }
+
+    private async Task RunAsync(string successMessage, Func<Task<string?>> operation)
+    {
+        IsBusy = true;
+        StatusMessage = "";
+        try
+        {
+            var error = await operation();
+            if (string.IsNullOrWhiteSpace(error))
+                SetStatus(successMessage, true);
+            else
+                SetStatus(error, false);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void SyncSelectedAction()
+    {
+        var first = AvailableActionsForSelectedInstance.FirstOrDefault();
+        if (first is not null)
+            SelectedAction = first.Action;
+    }
+
+    private void ClearSelection()
+    {
+        SelectedCartableStepId = 0;
+        SelectedInstance = null;
+        SelectedProcess = null;
+        StepComment = "";
+    }
+
+    private void RecalculateSelectedLeaveDays()
+    {
+        SelectedLeaveData.TotalDays = CalculateTotalDays(SelectedLeaveData.StartDate, SelectedLeaveData.EndDate);
+    }
+
+    private void RecalculateSelectedPurchaseTotal()
+    {
+        SelectedPurchaseData.TotalAmount = SelectedPurchaseData.Quantity * SelectedPurchaseData.UnitPrice;
+    }
+
+    private static int CalculateTotalDays(DateTime start, DateTime end)
+    {
+        return end.Date < start.Date ? 0 : (end.Date - start.Date).Days + 1;
+    }
+
+    private static LeaveRequestDataDto NewLeaveData()
+    {
+        return new LeaveRequestDataDto
+        {
+            LeaveType = "Annual",
+            StartDate = DateTime.Today.AddDays(7),
+            EndDate = DateTime.Today.AddDays(9),
+            TotalDays = 3,
+            Reason = "Family vacation",
+            ContactDuringLeave = "email",
+            BackupPersonId = 1002
+        };
+    }
+
+    private static PurchaseRequestDataDto NewPurchaseData()
+    {
+        return new PurchaseRequestDataDto
+        {
+            ItemDescription = "Laptop docking station",
+            Category = "IT Equipment",
+            Quantity = 2,
+            UnitPrice = 180,
+            TotalAmount = 360,
+            VendorName = "Preferred Vendor",
+            VendorContact = "sales@example.com",
+            Justification = "Required for new hybrid workstations",
+            BudgetCode = "IT-2026",
+            RequiredByDate = DateTime.Today.AddDays(14)
+        };
+    }
+
+    private LeaveRequestDataDto PrepareLeaveData(LeaveRequestDataDto data)
+    {
+        data.DataType = WorkflowDataTypes.LeaveRequest;
+        data.TotalDays = CalculateTotalDays(data.StartDate, data.EndDate);
+        return data;
+    }
+
+    private PurchaseRequestDataDto PreparePurchaseData(PurchaseRequestDataDto data)
+    {
+        data.DataType = WorkflowDataTypes.PurchaseRequest;
+        data.TotalAmount = data.Quantity * data.UnitPrice;
+        return data;
+    }
+
+    private void SetStatus(string message, bool success)
+    {
+        StatusMessage = message;
+        StatusCss = success ? "alert-success" : "alert-danger";
+    }
+
+    private string DataTypeLabel(string dataType)
+    {
+        var knownType = ProcessDataTypes.FirstOrDefault(t => t.Code.Equals(dataType, StringComparison.OrdinalIgnoreCase));
+        if (knownType is not null)
+            return knownType.DisplayName;
+
+        return dataType switch
+        {
+            WorkflowDataTypes.LeaveRequest => "Leave request",
+            WorkflowDataTypes.PurchaseRequest => "Purchase request",
+            _ => dataType
+        };
+    }
+
+    private bool IsSupportedDataType(string dataType)
+    {
+        return ProcessDataTypes.Any(t => t.Code.Equals(dataType, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string StepName(ProcessDto? process, int stepId)
+    {
+        return process?.Steps.FirstOrDefault(s => s.Id == stepId)?.Name ?? $"Step {stepId}";
+    }
+}

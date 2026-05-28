@@ -1,0 +1,305 @@
+@page "/archive"
+@rendermode InteractiveServer
+@using System.Text.Json
+@using WorkflowRBC.Blazor.Models
+@using WorkflowRBC.Blazor.Services
+@inject WorkflowApiClient Api
+@inject IConfiguration Configuration
+
+<PageTitle>Archive</PageTitle>
+
+<main class="workflow-console">
+    <div class="page-header">
+        <div>
+            <h1>Archive</h1>
+            <p>API: @ApiBaseUrl</p>
+        </div>
+        <button class="btn btn-outline-primary" @onclick="LoadArchiveAsync" disabled="@IsBusy">Refresh</button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <div class="alert @StatusCss" role="alert">@StatusMessage</div>
+    }
+
+    <section class="tool-section">
+        <div class="section-title">
+            <h2>Completed Instances</h2>
+            <span>@CompletedInstances.Count item(s)</span>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead>
+                    <tr>
+                        <th>Id</th>
+                        <th>Process</th>
+                        <th>Title</th>
+                        <th>Created by</th>
+                        <th>Completed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var instance in CompletedInstances)
+                    {
+                        <tr class="selectable-row @(instance.Id == SelectedInstanceId ? "selected-row" : "")"
+                            @onclick="() => SelectInstanceAsync(instance.Id)">
+                            <td>@instance.Id</td>
+                            <td>@instance.ProcessCode - @instance.ProcessName</td>
+                            <td>@instance.Title</td>
+                            <td>@instance.CreatedByUserId</td>
+                            <td>@(instance.CompletedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "-")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    @if (SelectedInstance is not null)
+    {
+        <section class="tool-section">
+            <div class="section-title">
+                <h2>Instance #@SelectedInstance.Id</h2>
+                <span>@SelectedInstance.Title</span>
+            </div>
+
+            <div class="instance-workspace">
+                <div>
+                    <h3>Flow</h3>
+                    <div class="timeline archive-flow">
+                        @foreach (var step in SelectedInstance.Steps.OrderBy(s => s.StartedAt ?? s.CompletedAt ?? DateTime.MaxValue))
+                        {
+                            <div class="timeline-item @(step.State == ProcessInstanceStepState.Completed ? "completed-step" : "")">
+                                <strong>@StepName(SelectedProcess, step.ProcessStepId)</strong>
+                                <span>@step.State</span>
+                                <small>@FormatStepTime(step)</small>
+                                @if (!string.IsNullOrWhiteSpace(step.Comments))
+                                {
+                                    <small>@step.Comments</small>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <h3>History</h3>
+                    @if (SelectedInstance.History.Count == 0)
+                    {
+                        <p class="muted">No history recorded.</p>
+                    }
+                    else
+                    {
+                        <ul class="history-list">
+                            @foreach (var item in SelectedInstance.History.OrderBy(h => h.PerformedAt))
+                            {
+                                <li>@item.PerformedAt.ToLocalTime(): @item.Action from @item.FromState to @item.ToState @item.Comments</li>
+                            }
+                        </ul>
+                    }
+                </div>
+
+                <div>
+                    <h3>@DataTypeLabel(SelectedInstanceDataType)</h3>
+                    @if (SelectedInstanceDataType == WorkflowDataTypes.LeaveRequest)
+                    {
+                        <dl class="data-summary">
+                            <dt>Leave type</dt>
+                            <dd>@SelectedLeaveData.LeaveType</dd>
+                            <dt>Dates</dt>
+                            <dd>@SelectedLeaveData.StartDate.ToString("yyyy-MM-dd") to @SelectedLeaveData.EndDate.ToString("yyyy-MM-dd")</dd>
+                            <dt>Total days</dt>
+                            <dd>@SelectedLeaveData.TotalDays</dd>
+                            <dt>Reason</dt>
+                            <dd>@SelectedLeaveData.Reason</dd>
+                            <dt>Contact</dt>
+                            <dd>@SelectedLeaveData.ContactDuringLeave</dd>
+                            <dt>Backup person</dt>
+                            <dd>@(SelectedLeaveData.BackupPersonId?.ToString() ?? "-")</dd>
+                            <dt>Emergency</dt>
+                            <dd>@(SelectedLeaveData.IsEmergency ? "Yes" : "No")</dd>
+                        </dl>
+                    }
+                    else if (SelectedInstanceDataType == WorkflowDataTypes.PurchaseRequest)
+                    {
+                        <dl class="data-summary">
+                            <dt>Item</dt>
+                            <dd>@SelectedPurchaseData.ItemDescription</dd>
+                            <dt>Category</dt>
+                            <dd>@SelectedPurchaseData.Category</dd>
+                            <dt>Budget code</dt>
+                            <dd>@SelectedPurchaseData.BudgetCode</dd>
+                            <dt>Quantity</dt>
+                            <dd>@SelectedPurchaseData.Quantity</dd>
+                            <dt>Unit price</dt>
+                            <dd>@SelectedPurchaseData.UnitPrice</dd>
+                            <dt>Total</dt>
+                            <dd>@SelectedPurchaseData.TotalAmount</dd>
+                            <dt>Vendor</dt>
+                            <dd>@SelectedPurchaseData.VendorName</dd>
+                            <dt>Required by</dt>
+                            <dd>@(SelectedPurchaseData.RequiredByDate?.ToString("yyyy-MM-dd") ?? "-")</dd>
+                            <dt>Justification</dt>
+                            <dd>@SelectedPurchaseData.Justification</dd>
+                        </dl>
+                    }
+                    else
+                    {
+                        <p class="muted">This data type is not supported in the archive view yet.</p>
+                    }
+                </div>
+            </div>
+        </section>
+    }
+</main>
+
+@code {
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private List<ProcessInstanceDto> CompletedInstances { get; set; } = new();
+    private List<ProcessDataTypeDto> ProcessDataTypes { get; set; } = new();
+    private ProcessInstanceDto? SelectedInstance { get; set; }
+    private ProcessDto? SelectedProcess { get; set; }
+    private LeaveRequestDataDto SelectedLeaveData { get; set; } = new();
+    private PurchaseRequestDataDto SelectedPurchaseData { get; set; } = new();
+    private string ApiBaseUrl => Configuration["WorkflowApi:BaseUrl"] ?? "http://localhost:5246";
+    private string SelectedInstanceDataType { get; set; } = WorkflowDataTypes.LeaveRequest;
+    private int SelectedInstanceId { get; set; }
+    private bool IsBusy { get; set; }
+    private string StatusMessage { get; set; } = "";
+    private string StatusCss { get; set; } = "alert-info";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadReferenceDataAsync();
+        await LoadArchiveAsync();
+    }
+
+    private async Task LoadReferenceDataAsync()
+    {
+        var dataTypes = await Api.GetProcessDataTypesAsync();
+        if (dataTypes.Succeeded && dataTypes.Value is not null)
+            ProcessDataTypes = dataTypes.Value;
+    }
+
+    private async Task LoadArchiveAsync()
+    {
+        await RunAsync("Loaded completed instances.", async () =>
+        {
+            var result = await Api.GetCompletedInstancesAsync();
+            if (!result.Succeeded || result.Value is null)
+                return result.Message;
+
+            CompletedInstances = result.Value;
+            if (SelectedInstanceId != 0 && !CompletedInstances.Any(i => i.Id == SelectedInstanceId))
+                ClearSelection();
+
+            return null;
+        });
+    }
+
+    private async Task SelectInstanceAsync(int instanceId)
+    {
+        await RunAsync("Loaded archived instance.", async () =>
+        {
+            SelectedInstanceId = instanceId;
+
+            var instanceResult = await Api.GetInstanceAsync(instanceId);
+            if (!instanceResult.Succeeded || instanceResult.Value is null)
+                return instanceResult.Message;
+
+            SelectedInstance = instanceResult.Value;
+
+            var processResult = await Api.GetProcessAsync(SelectedInstance.ProcessId);
+            if (processResult.Succeeded && processResult.Value is not null)
+                SelectedProcess = processResult.Value;
+
+            await LoadSelectedDataAsync(instanceId);
+            return null;
+        });
+    }
+
+    private async Task LoadSelectedDataAsync(int instanceId)
+    {
+        var data = await Api.GetInstanceDataJsonAsync(instanceId);
+        if (!data.Succeeded || string.IsNullOrWhiteSpace(data.Value))
+            return;
+
+        using var document = JsonDocument.Parse(data.Value);
+        SelectedInstanceDataType = document.RootElement.GetProperty("dataType").GetString()
+            ?? WorkflowDataTypes.LeaveRequest;
+
+        switch (SelectedInstanceDataType)
+        {
+            case WorkflowDataTypes.LeaveRequest:
+                SelectedLeaveData = JsonSerializer.Deserialize<LeaveRequestDataDto>(data.Value, JsonOptions) ?? new LeaveRequestDataDto();
+                break;
+            case WorkflowDataTypes.PurchaseRequest:
+                SelectedPurchaseData = JsonSerializer.Deserialize<PurchaseRequestDataDto>(data.Value, JsonOptions) ?? new PurchaseRequestDataDto();
+                break;
+        }
+    }
+
+    private async Task RunAsync(string successMessage, Func<Task<string?>> operation)
+    {
+        IsBusy = true;
+        StatusMessage = "";
+        try
+        {
+            var error = await operation();
+            if (string.IsNullOrWhiteSpace(error))
+                SetStatus(successMessage, true);
+            else
+                SetStatus(error, false);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private void ClearSelection()
+    {
+        SelectedInstanceId = 0;
+        SelectedInstance = null;
+        SelectedProcess = null;
+    }
+
+    private void SetStatus(string message, bool success)
+    {
+        StatusMessage = message;
+        StatusCss = success ? "alert-success" : "alert-danger";
+    }
+
+    private string DataTypeLabel(string dataType)
+    {
+        var knownType = ProcessDataTypes.FirstOrDefault(t => t.Code.Equals(dataType, StringComparison.OrdinalIgnoreCase));
+        if (knownType is not null)
+            return knownType.DisplayName;
+
+        return dataType switch
+        {
+            WorkflowDataTypes.LeaveRequest => "Leave request",
+            WorkflowDataTypes.PurchaseRequest => "Purchase request",
+            _ => dataType
+        };
+    }
+
+    private static string StepName(ProcessDto? process, int stepId)
+    {
+        return process?.Steps.FirstOrDefault(s => s.Id == stepId)?.Name ?? $"Step {stepId}";
+    }
+
+    private static string FormatStepTime(ProcessInstanceStepDto step)
+    {
+        if (step.CompletedAt is not null)
+            return $"Completed {step.CompletedAt.Value.ToLocalTime():yyyy-MM-dd HH:mm}";
+
+        if (step.StartedAt is not null)
+            return $"Started {step.StartedAt.Value.ToLocalTime():yyyy-MM-dd HH:mm}";
+
+        return string.Empty;
+    }
+}
