@@ -16,6 +16,9 @@ public class ProcessInstanceRepository : Repository<ProcessInstance>, IProcessIn
             .Include(pi => pi.Process)
             .Include(pi => pi.ProcessInstanceSteps.Where(pis => !pis.IsDeleted))
                 .ThenInclude(pis => pis.ProcessStep)
+            .Include(pi => pi.ProcessInstanceHistories)
+                .ThenInclude(h => h.ProcessStep)
+            .Include(m => m.Data)
             .FirstOrDefaultAsync(pi => pi.Id == instanceId);
     }
 

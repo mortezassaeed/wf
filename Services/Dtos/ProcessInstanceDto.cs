@@ -15,4 +15,5 @@ public class ProcessInstanceDto : BaseDto
     public ProcessInstanceStepDto CurrentStep { get; set; }
     public List<ProcessInstanceStepDto> Steps { get; set; } = new();
     public List<ProcessInstanceHistoryDto> History { get; set; } = new();
+    public dynamic? Data { get; set; }
 }

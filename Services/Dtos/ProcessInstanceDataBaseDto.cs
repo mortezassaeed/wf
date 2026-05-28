@@ -7,6 +7,4 @@ public abstract class ProcessInstanceDataBaseDto : IProcessDataDto
     public abstract string DataType { get; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
-    public int CreatedByUserId { get; set; }
-    public int? UpdatedByUserId { get; set; }
 }

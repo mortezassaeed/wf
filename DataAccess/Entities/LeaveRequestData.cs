@@ -2,6 +2,7 @@
 
 namespace DataAccess.Entities;
 
+[ProcessDataType("LEAVE_REQUEST", "Leave request")]
 public class LeaveRequestData : ProcessInstanceDataBase
 {
     [Required]

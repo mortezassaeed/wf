@@ -1,6 +1,7 @@
 using DataAccess.Entities;
 using Microsoft.EntityFrameworkCore;
 using Services;
+using Services.Resolver;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -18,6 +19,8 @@ builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 // Register specific repositories
 builder.Services.AddScoped<IProcessRepository, ProcessRepository>();
 builder.Services.AddScoped<IProcessInstanceRepository, ProcessInstanceRepository>();
+builder.Services.AddScoped<IProcessInstanceDataService, ProcessInstanceDataService>();
+builder.Services.AddSingleton<IProcessDataTypeProvider, ProcessDataTypeProvider>();
 
 var app = builder.Build();
 
@@ -28,7 +31,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.MapControllers();
 

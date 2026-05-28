@@ -30,9 +30,10 @@ public class Process
     public bool IsDeleted { get; set; } = false;
 
     // Navigation properties
-    public virtual ICollection<ProcessStep> ProcessSteps { get; set; }
-    public virtual ICollection<ProcessInstance> ProcessInstances { get; set; }
-    public virtual ICollection<ProcessStepAction> ProcessStepActions { get; set; }
+    public virtual ICollection<ProcessStep> ProcessSteps { get; set; } = new List<ProcessStep>();
+    public virtual ICollection<ProcessInstance> ProcessInstances { get; set; } = new List<ProcessInstance>();
+    public virtual ICollection<ProcessStepAction> ProcessStepActions { get; set; } = new List<ProcessStepAction>();
+    public virtual ICollection<ProcessAllowedDataType> ProcessAllowedDataTypes { get; set; } = new List<ProcessAllowedDataType>();
 
 
 }

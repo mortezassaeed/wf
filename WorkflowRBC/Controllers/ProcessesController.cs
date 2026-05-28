@@ -3,6 +3,8 @@ using DataAccess.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Services;
 using Services.Dtos;
+using Services.Mappers;
+using Services.Resolver;
 
 namespace WorkflowEngine.Controllers;
 
@@ -11,17 +13,27 @@ namespace WorkflowEngine.Controllers;
 public class ProcessesController : ControllerBase
 {
     private readonly IProcessRepository _processRepository;
+    private readonly IProcessDataTypeProvider _dataTypeProvider;
 
-    public ProcessesController(IProcessRepository processRepository)
+    public ProcessesController(
+        IProcessRepository processRepository,
+        IProcessDataTypeProvider dataTypeProvider)
     {
         _processRepository = processRepository;
+        _dataTypeProvider = dataTypeProvider;
+    }
+
+    [HttpGet("data-types")]
+    public ActionResult<IEnumerable<ProcessDataTypeDto>> GetDataTypes()
+    {
+        return Ok(_dataTypeProvider.GetAll());
     }
 
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ProcessDto>>> GetAll()
     {
         var processes = await _processRepository.GetAllAsync();
-        var dtos = processes.Select(MapToDto);
+        var dtos = processes.Select(ProcessMapper.ToDto);
         return Ok(dtos);
     }
 
@@ -29,7 +41,7 @@ public class ProcessesController : ControllerBase
     public async Task<ActionResult<IEnumerable<ProcessDto>>> GetActive()
     {
         var processes = await _processRepository.GetActiveProcessesAsync();
-        var dtos = processes.Select(MapToDto);
+        var dtos = processes.Select(ProcessMapper.ToDto);
         return Ok(dtos);
     }
 
@@ -40,7 +52,7 @@ public class ProcessesController : ControllerBase
         if (process == null)
             return NotFound(new { Message = $"Process with ID {id} not found" });
 
-        return Ok(MapToDetailDto(process));
+        return Ok(ProcessMapper.ToDto(process));
     }
 
     [HttpGet("code/{code}")]
@@ -50,7 +62,7 @@ public class ProcessesController : ControllerBase
         if (process == null)
             return NotFound(new { Message = $"Process with code '{code}' not found" });
 
-        return Ok(MapToDto(process));
+        return Ok(ProcessMapper.ToDto(process));
     }
 
     [HttpGet("{id:int}/definition")]
@@ -60,12 +72,50 @@ public class ProcessesController : ControllerBase
         if (process == null)
             return NotFound(new { Message = $"Process with ID {id} not found" });
 
-        return Ok(MapToWorkflowDefinition(process));
+        return Ok(ProcessMapper.ToWorkflowDefinitionDto(process));
+    }
+
+    [HttpGet("{id:int}/data-types")]
+    public async Task<ActionResult<IEnumerable<ProcessDataTypeDto>>> GetAllowedDataTypes(int id)
+    {
+        var process = await _processRepository.GetWithStepsAsync(id);
+        if (process == null)
+            return NotFound(new { Message = $"Process with ID {id} not found" });
+
+        var allowedCodes = process.ProcessAllowedDataTypes
+            .Select(t => t.DataType)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return Ok(_dataTypeProvider.GetAll().Where(t => allowedCodes.Contains(t.Code)));
+    }
+
+    [HttpPut("{id:int}/data-types")]
+    public async Task<ActionResult<ProcessDto>> UpdateAllowedDataTypes(
+        int id,
+        [FromBody] ProcessAllowedDataTypesRequestDto dto)
+    {
+        var process = await _processRepository.GetWithStepsAsync(id);
+        if (process == null)
+            return NotFound(new { Message = $"Process with ID {id} not found" });
+
+        var validationError = ValidateAllowedDataTypes(dto.DataTypes);
+        if (validationError != null)
+            return BadRequest(new { Message = validationError });
+
+        SetAllowedDataTypes(process, dto.DataTypes);
+        process.UpdatedAt = DateTime.UtcNow;
+
+        await _processRepository.UpdateAsync(process);
+        return Ok(ProcessMapper.ToDto(process));
     }
 
     [HttpPost]
     public async Task<ActionResult<ProcessDto>> Create([FromBody] CreateProcessDto dto)
     {
+        var validationError = ValidateAllowedDataTypes(dto.AllowedDataTypes);
+        if (validationError != null)
+            return BadRequest(new { Message = validationError });
+
         var process = new Process
         {
             Code = dto.Code,
@@ -73,16 +123,17 @@ public class ProcessesController : ControllerBase
             Description = dto.Description,
             IsActive = dto.IsActive,
             CreatedAt = DateTime.UtcNow,
+            ProcessAllowedDataTypes = BuildAllowedDataTypes(dto.AllowedDataTypes),
             ProcessSteps = dto.Steps?.Select(s => new ProcessStep
             {
                 Code = s.Code,
                 Name = s.Name,
-                Description = s.Description,
+                Description = s.Description ?? string.Empty,
                 Order = s.Order,
                 IsStart = s.IsStart,
                 IsEnd = s.IsEnd,
                 RequiresApproval = s.RequiresApproval,
-                ApproverRoles = s.ApproverRoles,
+                ApproverRoles = s.ApproverRoles ?? string.Empty,
                 IsActive = s.IsActive,
                 CreatedAt = DateTime.UtcNow,
                
@@ -90,23 +141,28 @@ public class ProcessesController : ControllerBase
         };
 
         await _processRepository.AddAsync(process);
-        return CreatedAtAction(nameof(GetById), new { id = process.Id }, MapToDto(process));
+        return CreatedAtAction(nameof(GetById), new { id = process.Id }, ProcessMapper.ToDto(process));
     }
 
     [HttpPut("{id:int}")]
     public async Task<ActionResult<ProcessDto>> Update(int id, [FromBody] UpdateProcessDto dto)
     {
-        var process = await _processRepository.GetByIdAsync(id);
+        var process = await _processRepository.GetWithStepsAsync(id);
         if (process == null)
             return NotFound(new { Message = $"Process with ID {id} not found" });
 
+        var validationError = ValidateAllowedDataTypes(dto.AllowedDataTypes);
+        if (validationError != null)
+            return BadRequest(new { Message = validationError });
+
         process.Name = dto.Name;
         process.Description = dto.Description;
+        SetAllowedDataTypes(process, dto.AllowedDataTypes);
         process.IsActive = dto.IsActive;
         process.UpdatedAt = DateTime.UtcNow;
 
         await _processRepository.UpdateAsync(process);
-        return Ok(MapToDto(process));
+        return Ok(ProcessMapper.ToDto(process));
     }
 
     [HttpDelete("{id:int}")]
@@ -120,89 +176,44 @@ public class ProcessesController : ControllerBase
         return NoContent();
     }
 
-    private static ProcessDto MapToDto(Process process)
+    private string? ValidateAllowedDataTypes(IEnumerable<string>? dataTypes)
     {
-        return new ProcessDto
-        {
-            Id = process.Id,
-            Code = process.Code,
-            Name = process.Name,
-            Description = process.Description,
-            IsActive = process.IsActive,
-            CreatedAt = process.CreatedAt,
-            UpdatedAt = process.UpdatedAt,
-            Steps = process.ProcessSteps?.Select(s => new ProcessStepDto
-            {
-                Id = s.Id,
-                ProcessId = s.ProcessId,
-                Code = s.Code,
-                Name = s.Name,
-                Description = s.Description,
-                Order = s.Order,
-                IsStart = s.IsStart,
-                IsEnd = s.IsEnd,
-                RequiresApproval = s.RequiresApproval,
-                ApproverRoles = s.ApproverRoles,
-                IsActive = s.IsActive,
-                CreatedAt = s.CreatedAt,
-                UpdatedAt = s.UpdatedAt,
+        var selectedDataTypes = NormalizeDataTypes(dataTypes).ToList();
+        if (selectedDataTypes.Count == 0)
+            return "At least one process data type is required.";
 
-            }).ToList(),
-        };
+        var invalidDataType = selectedDataTypes.FirstOrDefault(dataType => !_dataTypeProvider.Exists(dataType));
+        return invalidDataType == null ? null : $"Unknown process data type: {invalidDataType}";
     }
 
-    private static ProcessDto MapToDetailDto(Process process)
+    private static List<ProcessAllowedDataType> BuildAllowedDataTypes(IEnumerable<string> dataTypes)
     {
-        return new ProcessDto
-        {
-            Id = process.Id,
-            Code = process.Code,
-            Name = process.Name,
-            Description = process.Description,
-            IsActive = process.IsActive,
-            CreatedAt = process.CreatedAt,
-            UpdatedAt = process.UpdatedAt,
-            Steps = process.ProcessSteps?.Select(s => new ProcessStepDto
-            {
-                Id = s.Id,
-                ProcessId = s.ProcessId,
-                Code = s.Code,
-                Name = s.Name,
-                Description = s.Description,
-                Order = s.Order,
-                IsStart = s.IsStart,
-                IsEnd = s.IsEnd,
-                RequiresApproval = s.RequiresApproval,
-                ApproverRoles = s.ApproverRoles,
-                IsActive = s.IsActive,
-                CreatedAt = s.CreatedAt,
-                UpdatedAt = s.UpdatedAt,
-                
-            }).ToList()
-        };
+        return NormalizeDataTypes(dataTypes)
+            .Select(dataType => new ProcessAllowedDataType { DataType = dataType })
+            .ToList();
     }
 
-    private static WorkflowDefinitionDto MapToWorkflowDefinition(Process process)
+    private static void SetAllowedDataTypes(Process process, IEnumerable<string> dataTypes)
     {
-        return new WorkflowDefinitionDto
+        process.ProcessAllowedDataTypes.Clear();
+        foreach (var dataType in NormalizeDataTypes(dataTypes))
         {
-            //ProcessId = process.Id,
-            ProcessCode = process.Code,
-            ProcessName = process.Name,
-            Steps = process.ProcessSteps?.Select(s => new WorkflowStepDefinitionDto
+            process.ProcessAllowedDataTypes.Add(new ProcessAllowedDataType
             {
-                //StepId = s.Id,
-                //StepCode = s.Code,
-                //StepName = s.Name,
-                //Order = s.Order,
-                IsStart = s.IsStart,
-                IsEnd = s.IsEnd,
-                RequiresApproval = s.RequiresApproval,
-                //ApproverRoles = s.ApproverRoles,
-                //AvailableActions = s.ProcessStepActions?.Select(a => a.Action).ToList()
-            }).ToList()
-        };
+                ProcessId = process.Id,
+                DataType = dataType
+            });
+        }
     }
+
+    private static IEnumerable<string> NormalizeDataTypes(IEnumerable<string>? dataTypes)
+    {
+        return (dataTypes ?? Enumerable.Empty<string>())
+            .Where(dataType => !string.IsNullOrWhiteSpace(dataType))
+            .Select(dataType => dataType.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+    }
+
 }
 
 
@@ -229,7 +240,7 @@ public class ProcessStepsController : ControllerBase
         if (process == null)
             return NotFound(new { Message = $"Process with ID {processId} not found" });
 
-        var dtos = process.ProcessSteps.Select(MapToDto);
+        var dtos = process.ProcessSteps.Select(ProcessMapper.ToStepDto);
         return Ok(dtos);
     }
 
@@ -240,7 +251,7 @@ public class ProcessStepsController : ControllerBase
         if (step == null || step.ProcessId != processId)
             return NotFound(new { Message = $"Step with ID {stepId} not found in process {processId}" });
 
-        return Ok(MapToDto(step));
+        return Ok(ProcessMapper.ToStepDto(step));
     }
 
     [HttpPost]
@@ -255,12 +266,12 @@ public class ProcessStepsController : ControllerBase
             ProcessId = processId,
             Code = dto.Code,
             Name = dto.Name,
-            Description = dto.Description,
+            Description = dto.Description ?? string.Empty,
             Order = dto.Order,
             IsStart = dto.IsStart,
             IsEnd = dto.IsEnd,
             RequiresApproval = dto.RequiresApproval,
-            ApproverRoles = dto.ApproverRoles,
+            ApproverRoles = dto.ApproverRoles ?? string.Empty,
             IsActive = dto.IsActive,
             CreatedAt = DateTime.UtcNow
             //ProcessStepActions = dto.Actions?.Select(a => new ProcessStepAction
@@ -273,7 +284,7 @@ public class ProcessStepsController : ControllerBase
         };
 
         await _stepRepository.AddAsync(step);
-        return CreatedAtAction(nameof(GetStep), new { processId, stepId = step.Id }, MapToDto(step));
+        return CreatedAtAction(nameof(GetStep), new { processId, stepId = step.Id }, ProcessMapper.ToStepDto(step));
     }
 
     [HttpPut("{stepId:int}")]
@@ -284,17 +295,17 @@ public class ProcessStepsController : ControllerBase
             return NotFound(new { Message = $"Step with ID {stepId} not found in process {processId}" });
 
         step.Name = dto.Name;
-        step.Description = dto.Description;
+        step.Description = dto.Description ?? string.Empty;
         step.Order = dto.Order;
         step.IsStart = dto.IsStart;
         step.IsEnd = dto.IsEnd;
         step.RequiresApproval = dto.RequiresApproval;
-        step.ApproverRoles = dto.ApproverRoles;
+        step.ApproverRoles = dto.ApproverRoles ?? string.Empty;
         step.IsActive = dto.IsActive;
         step.UpdatedAt = DateTime.UtcNow;
 
         await _stepRepository.UpdateAsync(step);
-        return Ok(MapToDto(step));
+        return Ok(ProcessMapper.ToStepDto(step));
     }
 
     [HttpDelete("{stepId:int}")]
@@ -308,36 +319,73 @@ public class ProcessStepsController : ControllerBase
         return NoContent();
     }
 
-    private static ProcessStepDto MapToDto(ProcessStep step)
+}
+
+[ApiController]
+[Route("api/processes/{processId:int}/actions")]
+public class ProcessStepActionsController : ControllerBase
+{
+    private readonly IRepository<ProcessStepAction> _actionRepository;
+    private readonly IProcessRepository _processRepository;
+
+    public ProcessStepActionsController(
+        IRepository<ProcessStepAction> actionRepository,
+        IProcessRepository processRepository)
     {
-        return new ProcessStepDto
-        {
-            Id = step.Id,
-            ProcessId = step.ProcessId,
-            Code = step.Code,
-            Name = step.Name,
-            Description = step.Description,
-            Order = step.Order,
-            IsStart = step.IsStart,
-            IsEnd = step.IsEnd,
-            RequiresApproval = step.RequiresApproval,
-            ApproverRoles = step.ApproverRoles,
-            IsActive = step.IsActive,
-            CreatedAt = step.CreatedAt,
-            UpdatedAt = step.UpdatedAt
-            //Actions = step.ProcessStepActions?.Select(a => new ProcessStepActionDto
-            //{
-            //    Id = a.Id,
-            //    ProcessStepId = a.ProcessStepId,
-            //    Action = a.Action,
-            //    DisplayName = a.DisplayName,
-            //    IsActive = a.IsActive,
-            //    CreatedAt = a.CreatedAt,
-            //    UpdatedAt = a.UpdatedAt,
-            //    FromStepId = a.FromStepId,
-            //    ToStepId = a.ToStepId
-            //}
-            //).ToList()
-        };
+        _actionRepository = actionRepository;
+        _processRepository = processRepository;
     }
+
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<ProcessStepActionDto>>> GetActions(int processId)
+    {
+        var process = await _processRepository.GetWithStepsAsync(processId);
+        if (process == null)
+            return NotFound(new { Message = $"Process with ID {processId} not found" });
+
+        var dtos = process.ProcessStepActions?.Select(ProcessMapper.ToActionDto) ?? Enumerable.Empty<ProcessStepActionDto>();
+        return Ok(dtos);
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<ProcessStepActionDto>> CreateAction(int processId, [FromBody] CreateProcessStepActionDto dto)
+    {
+        if (dto.ProcessId != 0 && dto.ProcessId != processId)
+            return BadRequest(new { Message = "Route process ID and body process ID do not match" });
+
+        var process = await _processRepository.GetWithStepsAsync(processId);
+        if (process == null)
+            return NotFound(new { Message = $"Process with ID {processId} not found" });
+
+        var fromStepExists = process.ProcessSteps.Any(s => s.Id == dto.FromStepId);
+        var toStepExists = process.ProcessSteps.Any(s => s.Id == dto.ToStepId);
+        if (!fromStepExists || !toStepExists)
+            return BadRequest(new { Message = "FromStepId and ToStepId must both belong to the process" });
+
+        var action = new ProcessStepAction
+        {
+            ProcessId = processId,
+            FromStepId = dto.FromStepId,
+            ToStepId = dto.ToStepId,
+            Action = dto.Action,
+            DisplayName = dto.DisplayName,
+            IsActive = dto.IsActive,
+            CreatedAt = DateTime.UtcNow
+        };
+
+        await _actionRepository.AddAsync(action);
+        return CreatedAtAction(nameof(GetActions), new { processId }, ProcessMapper.ToActionDto(action));
+    }
+
+    [HttpDelete("{actionId:int}")]
+    public async Task<ActionResult> DeleteAction(int processId, int actionId)
+    {
+        var action = await _actionRepository.GetByIdAsync(actionId);
+        if (action == null || action.ProcessId != processId)
+            return NotFound(new { Message = $"Action with ID {actionId} not found in process {processId}" });
+
+        await _actionRepository.DeleteAsync(actionId);
+        return NoContent();
+    }
+
 }

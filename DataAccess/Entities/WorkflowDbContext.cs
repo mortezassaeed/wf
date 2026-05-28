@@ -19,6 +19,7 @@ public class WorkflowDbContext : DbContext
     }
 
     public DbSet<Process> Processes { get; set; }
+    public DbSet<ProcessAllowedDataType> ProcessAllowedDataTypes { get; set; }
     public DbSet<ProcessStep> ProcessSteps { get; set; }
     public DbSet<ProcessStepAction> ProcessStepActions { get; set; }
     //public DbSet<ProcessStepTransition> ProcessStepTransitions { get; set; }
@@ -47,6 +48,16 @@ public class WorkflowDbContext : DbContext
         {
             entity.HasIndex(e => e.Code).IsUnique();
             entity.HasQueryFilter(e => !e.IsDeleted);
+        });
+
+        modelBuilder.Entity<ProcessAllowedDataType>(entity =>
+        {
+            entity.HasIndex(e => new { e.ProcessId, e.DataType }).IsUnique();
+
+            entity.HasOne(e => e.Process)
+                .WithMany(p => p.ProcessAllowedDataTypes)
+                .HasForeignKey(e => e.ProcessId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ProcessStep

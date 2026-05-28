@@ -3,6 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace DataAccess.Entities;
 
+[ProcessDataType("PURCHASE_REQUEST", "Purchase request")]
 public class PurchaseRequestData : ProcessInstanceDataBase
 {
     [Required]
