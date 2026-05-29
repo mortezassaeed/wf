@@ -120,12 +120,31 @@ public class ProcessInstancesController : ControllerBase
     //}
 
     [HttpGet("cartable")]
-    public async Task<ActionResult<IEnumerable<CartableItemDto>>> GetCartable([FromQuery] int? userId)
+    public async Task<ActionResult<PagedResultDto<CartableItemDto>>> GetCartable(
+        [FromQuery] int? userId,
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10)
     {
         var currentUserId = userId ?? LoggedInUserId;
         var steps = await _instanceRepository.GetPendingStepsByUserAsync(currentUserId);
-        var dtos = steps.Select(ProcessInstanceMapper.ToCartableItemDto);
-        return Ok(dtos);
+        var dtos = steps
+            .OrderByDescending(step => step.StartedAt ?? step.CreatedAt)
+            .Select(ProcessInstanceMapper.ToCartableItemDto);
+
+        return Ok(PagedResultDto<CartableItemDto>.Create(dtos, pageNumber, pageSize));
+    }
+
+    [HttpGet("archive")]
+    public async Task<ActionResult<PagedResultDto<ProcessInstanceSummaryDto>>> GetArchive(
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 10)
+    {
+        var instances = await _instanceRepository.GetByStateAsync(ProcessInstanceState.Completed);
+        var dtos = instances
+            .OrderByDescending(instance => instance.CompletedAt ?? instance.UpdatedAt ?? instance.CreatedAt)
+            .Select(ProcessInstanceMapper.ToSummaryDto);
+
+        return Ok(PagedResultDto<ProcessInstanceSummaryDto>.Create(dtos, pageNumber, pageSize));
     }
 
     [HttpPost]

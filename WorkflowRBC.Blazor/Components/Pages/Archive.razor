@@ -25,10 +25,25 @@
     <section class="tool-section">
         <div class="section-title">
             <h2>Completed Instances</h2>
-            <span>@CompletedInstances.Count item(s)</span>
+            <span>@ArchivePage.TotalCount item(s)</span>
         </div>
 
-        <div class="table-responsive">
+        <div class="form-grid compact">
+            <label>
+                Page size
+                <select class="form-select" @bind="ArchivePageSize">
+                    <option value="5">5</option>
+                    <option value="10">10</option>
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                </select>
+            </label>
+            <div class="action-row">
+                <button class="btn btn-primary" @onclick="ResetArchivePageAsync" disabled="@IsBusy">Load archive</button>
+            </div>
+        </div>
+
+        <div class="table-responsive mt-3">
             <table class="table table-sm align-middle">
                 <thead>
                     <tr>
@@ -53,6 +68,12 @@
                     }
                 </tbody>
             </table>
+        </div>
+
+        <div class="action-row">
+            <button class="btn btn-outline-secondary" @onclick="PreviousArchivePageAsync" disabled="@(!CanGoToPreviousArchivePage)">Previous</button>
+            <span class="muted">@ArchivePageSummary</span>
+            <button class="btn btn-outline-secondary" @onclick="NextArchivePageAsync" disabled="@(!CanGoToNextArchivePage)">Next</button>
         </div>
     </section>
 
@@ -159,6 +180,7 @@
     };
 
     private List<ProcessInstanceDto> CompletedInstances { get; set; } = new();
+    private PagedResultDto<ProcessInstanceDto> ArchivePage { get; set; } = new() { PageNumber = 1, PageSize = 10 };
     private List<ProcessDataTypeDto> ProcessDataTypes { get; set; } = new();
     private ProcessInstanceDto? SelectedInstance { get; set; }
     private ProcessDto? SelectedProcess { get; set; }
@@ -166,10 +188,18 @@
     private PurchaseRequestDataDto SelectedPurchaseData { get; set; } = new();
     private string ApiBaseUrl => Configuration["WorkflowApi:BaseUrl"] ?? "http://localhost:5246";
     private string SelectedInstanceDataType { get; set; } = WorkflowDataTypes.LeaveRequest;
+    private int ArchivePageNumber { get; set; } = 1;
+    private int ArchivePageSize { get; set; } = 10;
     private int SelectedInstanceId { get; set; }
     private bool IsBusy { get; set; }
     private string StatusMessage { get; set; } = "";
     private string StatusCss { get; set; } = "alert-info";
+    private bool CanGoToPreviousArchivePage => !IsBusy && ArchivePage.HasPreviousPage;
+    private bool CanGoToNextArchivePage => !IsBusy && ArchivePage.HasNextPage;
+    private string ArchivePageSummary =>
+        ArchivePage.TotalCount == 0
+            ? "Page 0 of 0"
+            : $"Page {ArchivePage.PageNumber} of {ArchivePage.TotalPages}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -188,16 +218,43 @@
     {
         await RunAsync("Loaded completed instances.", async () =>
         {
-            var result = await Api.GetCompletedInstancesAsync();
+            var result = await Api.GetCompletedInstancesAsync(ArchivePageNumber, ArchivePageSize);
             if (!result.Succeeded || result.Value is null)
                 return result.Message;
 
-            CompletedInstances = result.Value;
+            ArchivePage = result.Value;
+            ArchivePageNumber = ArchivePage.PageNumber;
+            ArchivePageSize = ArchivePage.PageSize;
+            CompletedInstances = result.Value.Items;
             if (SelectedInstanceId != 0 && !CompletedInstances.Any(i => i.Id == SelectedInstanceId))
                 ClearSelection();
 
             return null;
         });
+    }
+
+    private async Task ResetArchivePageAsync()
+    {
+        ArchivePageNumber = 1;
+        await LoadArchiveAsync();
+    }
+
+    private async Task PreviousArchivePageAsync()
+    {
+        if (!ArchivePage.HasPreviousPage)
+            return;
+
+        ArchivePageNumber--;
+        await LoadArchiveAsync();
+    }
+
+    private async Task NextArchivePageAsync()
+    {
+        if (!ArchivePage.HasNextPage)
+            return;
+
+        ArchivePageNumber++;
+        await LoadArchiveAsync();
     }
 
     private async Task SelectInstanceAsync(int instanceId)

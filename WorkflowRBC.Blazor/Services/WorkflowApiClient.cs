@@ -49,14 +49,16 @@ public sealed class WorkflowApiClient
         return await SendAsync<List<ProcessInstanceDto>>(() => _httpClient.GetAsync("api/ProcessInstances"));
     }
 
-    public async Task<ApiResult<List<ProcessInstanceDto>>> GetCompletedInstancesAsync()
+    public async Task<ApiResult<PagedResultDto<ProcessInstanceDto>>> GetCompletedInstancesAsync(int pageNumber, int pageSize)
     {
-        return await SendAsync<List<ProcessInstanceDto>>(() => _httpClient.GetAsync($"api/ProcessInstances?state={(int)ProcessInstanceState.Completed}"));
+        return await SendAsync<PagedResultDto<ProcessInstanceDto>>(() =>
+            _httpClient.GetAsync($"api/ProcessInstances/archive?pageNumber={pageNumber}&pageSize={pageSize}"));
     }
 
-    public async Task<ApiResult<List<CartableItemDto>>> GetCartableAsync(int userId)
+    public async Task<ApiResult<PagedResultDto<CartableItemDto>>> GetCartableAsync(int userId, int pageNumber, int pageSize)
     {
-        return await SendAsync<List<CartableItemDto>>(() => _httpClient.GetAsync($"api/ProcessInstances/cartable?userId={userId}"));
+        return await SendAsync<PagedResultDto<CartableItemDto>>(() =>
+            _httpClient.GetAsync($"api/ProcessInstances/cartable?userId={userId}&pageNumber={pageNumber}&pageSize={pageSize}"));
     }
 
     public async Task<ApiResult<ProcessInstanceDto>> GetInstanceAsync(int instanceId)
