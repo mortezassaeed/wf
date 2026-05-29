@@ -31,6 +31,7 @@ public class WorkflowDbContext : DbContext
     public DbSet<ProcessInstanceDataBase> ProcessInstanceDataBase { get; set; }
     public DbSet<LeaveRequestData> LeaveRequestData { get; set; }
     public DbSet<PurchaseRequestData> PurchaseRequestData { get; set; }
+    public DbSet<ReopeningSymbolData> ReopeningSymbolData { get; set; }
 
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -172,7 +173,8 @@ public class WorkflowDbContext : DbContext
         // TPT - Each derived type maps to its own table
         modelBuilder.Entity<LeaveRequestData>().ToTable("LeaveRequestData");
         modelBuilder.Entity<PurchaseRequestData>().ToTable("PurchaseRequestData");
-       
+        modelBuilder.Entity<ReopeningSymbolData>().ToTable("ReopeningSymbolData");
+
 
 
     }

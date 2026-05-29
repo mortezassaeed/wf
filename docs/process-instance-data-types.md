@@ -6,6 +6,7 @@ The current design uses:
 
 - A data entity in `DataAccess.Entities`
 - A DTO in `Services.Dtos`
+- Reflection metadata from DTO fields for API documentation and Blazor forms
 - A data handler in `Services.Resolver`
 - EF Core TPT mapping in `WorkflowDbContext`
 - Dependency injection registration in `WorkflowRBC/Program.cs`
@@ -113,11 +114,22 @@ public class ExpenseClaimDto : ProcessInstanceDataBaseDto
 {
     public override string DataType => "EXPENSE_CLAIM";
 
+    [ProcessDataField(Label = "Claim title", Order = 10)]
     public string ClaimTitle { get; set; }
+
+    [ProcessDataField(Label = "Total amount", Order = 20)]
     public decimal TotalAmount { get; set; }
+
+    [ProcessDataField(Label = "Currency", Placeholder = "USD", Order = 30)]
     public string Currency { get; set; }
+
+    [ProcessDataField(Label = "Purpose", ControlType = "textarea", Order = 40)]
     public string Purpose { get; set; }
+
+    [ProcessDataField(Label = "Expense date", ControlType = "date", Order = 50)]
     public DateTime ExpenseDate { get; set; }
+
+    [ProcessDataField(Label = "Has receipt", Order = 60)]
     public bool HasReceipt { get; set; }
 }
 ```
@@ -127,6 +139,46 @@ Important:
 - Inherit from `ProcessInstanceDataBaseDto`.
 - Return the same `DataType` code used by the entity attribute.
 - Keep DTO fields aligned with the entity fields that the API should expose.
+- Add `[ProcessDataField]` when you want better labels, ordering, placeholders, help text, control type, or hidden fields.
+- The metadata attribute is optional. Without it, the API still discovers public DTO properties and derives display names and field types.
+
+Base DTO fields are not exposed as form fields:
+
+- `id`
+- `processInstanceId`
+- `dataType`
+- `createdAt`
+- `updatedAt`
+
+Supported field metadata:
+
+```json
+{
+  "name": "claimTitle",
+  "displayName": "Claim title",
+  "type": "string",
+  "required": true,
+  "maxLength": 200,
+  "minimum": null,
+  "maximum": null,
+  "helpText": null,
+  "placeholder": null,
+  "controlType": null,
+  "order": 10,
+  "options": []
+}
+```
+
+Field type values are currently:
+
+- `string`
+- `number`
+- `date`
+- `boolean`
+- `enum`
+- `object`
+
+Blazor uses this metadata to render forms. For example, `controlType: "textarea"` renders a textarea, `controlType: "date"` renders a date input, enum fields render select options, and boolean fields render checkboxes.
 
 ## 5. Create The Data Handler
 
@@ -238,6 +290,40 @@ Body:
 
 The create instance endpoint checks this list before accepting process instance data.
 
+Frontend clients can discover available types and payload fields from:
+
+```http
+GET /api/Processes/data-types
+GET /api/Processes/{processId}/data-types
+```
+
+Example response item:
+
+```json
+{
+  "code": "EXPENSE_CLAIM",
+  "displayName": "Expense claim",
+  "entityType": "ExpenseClaimData",
+  "dtoType": "ExpenseClaimDto",
+  "fields": [
+    {
+      "name": "claimTitle",
+      "displayName": "Claim title",
+      "type": "string",
+      "required": true,
+      "maxLength": 200,
+      "minimum": null,
+      "maximum": null,
+      "helpText": null,
+      "placeholder": null,
+      "controlType": null,
+      "order": 10,
+      "options": []
+    }
+  ]
+}
+```
+
 ## 9. Create A Process Instance With The New Data Type
 
 Use:
@@ -293,6 +379,25 @@ Example body:
 
 This endpoint updates existing data. It returns `404 Not Found` if the process instance has no data row.
 
+The endpoint also checks the active workflow step. If the active `ProcessStep.CanEditData` value is `false`, the update is rejected with `400 Bad Request`.
+
+Use `CanEditData` on process steps to control whether users can edit data at that workflow step:
+
+```json
+{
+  "code": "MANAGER_APPROVAL",
+  "name": "Manager approval",
+  "order": 20,
+  "isStart": false,
+  "isEnd": false,
+  "requiresApproval": true,
+  "canEditData": false,
+  "isActive": true
+}
+```
+
+Default value is `true`, so existing editable steps keep the old behavior unless configured otherwise.
+
 ## 11. Verify The Backend
 
 Build the API project:
@@ -304,33 +409,26 @@ dotnet build .\WorkflowRBC\WorkflowRBC.csproj
 Then verify:
 
 - `GET /api/Processes/data-types` includes the new data type.
+- `GET /api/Processes/data-types` includes the new DTO field schema.
+- `GET /api/Processes/{processId}/data-types` returns only the configured data types for that process.
 - Creating a process instance succeeds when the process allows the new data type.
 - Creating a process instance fails when the process does not allow the new data type.
 - `GET /api/ProcessInstances/{id}` returns the typed data in `data`.
 - `PUT /api/ProcessInstances/{id}/data` updates the typed data.
+- `PUT /api/ProcessInstances/{id}/data` fails when the active step has `canEditData: false`.
 
-## 12. Optional: Add Blazor Test UI Support
+## 12. Verify Blazor Test UI Support
 
-The backend can support a new data type without changing Blazor.
+The Blazor test UI renders process data forms from the `fields` metadata returned by the data-types APIs.
 
-If the Blazor test UI should edit or display the new type, update:
+After adding a new DTO and allowing it for a process, verify:
 
-```text
-WorkflowRBC.Blazor/Models/WorkflowApiModels.cs
-WorkflowRBC.Blazor/Services/WorkflowApiClient.cs
-WorkflowRBC.Blazor/Components/Pages/Home.razor
-WorkflowRBC.Blazor/Components/Pages/Cartable.razor
-WorkflowRBC.Blazor/Components/Pages/Archive.razor
-```
+- The Start Process section shows the new data type in the process data type select.
+- Changing the selected data type updates the generated form.
+- Cartable renders the current instance data using the generated form.
+- Read-only workflow steps disable the generated form and update button.
 
-Typical Blazor changes:
-
-- Add a DTO model for the new data type.
-- Add a data type constant.
-- Add form rendering for the new type.
-- Add JSON deserialization for the selected type.
-- Add update API client method.
-- Add display support in archive/cartable pages.
+No per-data-type Razor form code is required for normal fields.
 
 ## Checklist
 
@@ -341,10 +439,12 @@ Use this checklist for every new process instance data type:
 - Add `DbSet<{Name}Data>` to `WorkflowDbContext`.
 - Add TPT mapping in `ConfigureProcessInstanceData`.
 - Create `Services/Dtos/{Name}Dto.cs`.
+- Optionally add `[ProcessDataField]` attributes to DTO properties.
 - Create `Services/Resolver/{Name}DataHandler.cs`.
 - Register the handler in `WorkflowRBC/Program.cs`.
 - Add and review an EF Core migration.
 - Apply the migration.
 - Allow the data type for the target process.
 - Test create, get, and update API flows.
-- Optionally add Blazor UI support.
+- Verify the data-types API exposes the field schema.
+- Verify Blazor renders the generated form.

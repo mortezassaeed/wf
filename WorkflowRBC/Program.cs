@@ -21,6 +21,9 @@ builder.Services.AddScoped<IProcessRepository, ProcessRepository>();
 builder.Services.AddScoped<IProcessInstanceRepository, ProcessInstanceRepository>();
 builder.Services.AddScoped<IProcessDataHandler, LeaveRequestDataHandler>();
 builder.Services.AddScoped<IProcessDataHandler, PurchaseRequestDataHandler>();
+
+builder.Services.AddScoped<IProcessDataHandler, ReopeningSymbolDataHandler>();
+
 builder.Services.AddScoped<IProcessInstanceDataService, ProcessInstanceDataService>();
 builder.Services.AddSingleton<IProcessDataTypeProvider, ProcessDataTypeProvider>();
 

@@ -47,3 +47,35 @@ public sealed class PurchaseRequestDataHandler : ProcessDataHandlerBase<Purchase
         };
     }
 }
+
+
+public sealed class ReopeningSymbolDataHandler : ProcessDataHandlerBase<ReopeningSymbolDto, ReopeningSymbolData>
+{
+    public override string DataType => "REOPENING_SYMBOL";
+
+    protected override ReopeningSymbolData CreateEntity(ReopeningSymbolDto dto)
+    {
+        return new ReopeningSymbolData
+        {
+            SymbolName = dto.SymbolName,
+            ClosingDate = dto.ClosingDate,
+            ClosingPrice = dto.ClosingPrice,
+            Description = dto.Description,
+        };
+    }
+
+    protected override IProcessDataDto ToDto(ReopeningSymbolData entity)
+    {
+        return new ReopeningSymbolDto
+        {
+            Id = entity.Id,
+            ProcessInstanceId = entity.ProcessInstanceId,
+            CreatedAt = entity.CreatedAt,
+            UpdatedAt = entity.UpdatedAt,
+            SymbolName = entity.SymbolName,
+            ClosingDate = entity.ClosingDate,
+            ClosingPrice = entity.ClosingPrice,
+            Description = entity.Description,
+        };
+    }
+}

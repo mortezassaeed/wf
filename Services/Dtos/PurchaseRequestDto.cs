@@ -1,4 +1,7 @@
-﻿namespace Services.Dtos;
+﻿using DataAccess.Entities;
+using System.ComponentModel.DataAnnotations;
+
+namespace Services.Dtos;
 
 public class PurchaseRequestDto : ProcessInstanceDataBaseDto
 {
