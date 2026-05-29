@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using DataAccess.Enums;
 using Services;
 using Services.Dtos;
 using Services.Resolver;
@@ -39,9 +40,18 @@ public class ProcessInstanceDataController : ControllerBase
         int processInstanceId,
         [FromBody] ProcessInstanceDataRequestDto request)
     {
-        var instance = await _instanceRepository.GetByIdAsync(processInstanceId);
+        var instance = await _instanceRepository.GetWithStepsAsync(processInstanceId);
         if (instance == null)
             return NotFound(new { Message = $"Process instance with ID {processInstanceId} not found" });
+
+        var currentStep = instance.ProcessInstanceSteps?
+            .FirstOrDefault(step => step.State == ProcessInstanceStepState.Active);
+
+        if (currentStep == null)
+            return BadRequest(new { Message = "No active step found for this process instance." });
+
+        if (currentStep.ProcessStep?.CanEditData != true)
+            return BadRequest(new { Message = "The current workflow step does not allow editing process data." });
 
         IProcessDataDto dto;
         try

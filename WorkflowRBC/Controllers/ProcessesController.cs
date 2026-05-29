@@ -258,6 +258,7 @@ public class ProcessStepsController : ControllerBase
         step.IsStart = dto.IsStart;
         step.IsEnd = dto.IsEnd;
         step.RequiresApproval = dto.RequiresApproval;
+        step.CanEditData = dto.CanEditData;
         step.ApproverRoles = dto.ApproverRoles ?? string.Empty;
         step.IsActive = dto.IsActive;
         step.UpdatedAt = DateTime.UtcNow;

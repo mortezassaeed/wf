@@ -62,6 +62,7 @@ public sealed class ProcessStepDto
     public bool IsStart { get; set; }
     public bool IsEnd { get; set; }
     public bool RequiresApproval { get; set; }
+    public bool CanEditData { get; set; } = true;
     public string? ApproverRoles { get; set; }
     public bool IsActive { get; set; } = true;
 }
@@ -155,6 +156,7 @@ public sealed class CartableItemDto
     public int ProcessStepId { get; set; }
     public string StepCode { get; set; } = "";
     public string StepName { get; set; } = "";
+    public bool CanEditData { get; set; } = true;
     public ProcessInstanceStepState StepState { get; set; }
     public int? AssignedToUserId { get; set; }
     public DateTime? StartedAt { get; set; }

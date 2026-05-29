@@ -30,6 +30,8 @@ public class ProcessStep
 
     public bool RequiresApproval { get; set; } = false;
 
+    public bool CanEditData { get; set; } = true;
+
     [MaxLength(500)]
     public string ApproverRoles { get; set; }
 

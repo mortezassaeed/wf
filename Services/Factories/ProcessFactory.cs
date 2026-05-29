@@ -58,6 +58,7 @@ public static class ProcessFactory
             IsStart = dto.IsStart,
             IsEnd = dto.IsEnd,
             RequiresApproval = dto.RequiresApproval,
+            CanEditData = dto.CanEditData,
             ApproverRoles = dto.ApproverRoles ?? string.Empty,
             IsActive = dto.IsActive,
             CreatedAt = DateTime.UtcNow
@@ -75,6 +76,7 @@ public static class ProcessFactory
             IsStart = dto.IsStart,
             IsEnd = dto.IsEnd,
             RequiresApproval = dto.RequiresApproval,
+            CanEditData = dto.CanEditData,
             ApproverRoles = dto.ApproverRoles ?? string.Empty,
             IsActive = dto.IsActive,
             CreatedAt = DateTime.UtcNow

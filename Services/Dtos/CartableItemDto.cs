@@ -13,6 +13,7 @@ public class CartableItemDto
     public int ProcessStepId { get; set; }
     public string StepCode { get; set; } = string.Empty;
     public string StepName { get; set; } = string.Empty;
+    public bool CanEditData { get; set; } = true;
     public ProcessInstanceStepState StepState { get; set; }
     public int? AssignedToUserId { get; set; }
     public DateTime? StartedAt { get; set; }

@@ -88,6 +88,7 @@ public static class ProcessInstanceMapper
             ProcessStepId = step.ProcessStepId,
             StepCode = step.ProcessStep?.Code ?? string.Empty,
             StepName = step.ProcessStep?.Name ?? string.Empty,
+            CanEditData = step.ProcessStep?.CanEditData ?? false,
             StepState = step.State,
             AssignedToUserId = step.AssignedToUserId,
             StartedAt = step.StartedAt,

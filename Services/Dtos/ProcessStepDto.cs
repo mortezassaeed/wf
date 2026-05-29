@@ -10,6 +10,7 @@ public class ProcessStepDto : BaseDto
     public bool IsStart { get; set; }
     public bool IsEnd { get; set; }
     public bool RequiresApproval { get; set; }
+    public bool CanEditData { get; set; } = true;
     public string? ApproverRoles { get; set; }
     public bool IsActive { get; set; }
     public List<ProcessStepActionDto> Actions { get; set; } = new();

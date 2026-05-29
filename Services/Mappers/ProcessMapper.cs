@@ -32,7 +32,8 @@ public static class ProcessMapper
             {
                 IsStart = s.IsStart,
                 IsEnd = s.IsEnd,
-                RequiresApproval = s.RequiresApproval
+                RequiresApproval = s.RequiresApproval,
+                CanEditData = s.CanEditData
             }).ToList() ?? new List<WorkflowStepDefinitionDto>()
         };
     }
@@ -50,6 +51,7 @@ public static class ProcessMapper
             IsStart = step.IsStart,
             IsEnd = step.IsEnd,
             RequiresApproval = step.RequiresApproval,
+            CanEditData = step.CanEditData,
             ApproverRoles = step.ApproverRoles ?? string.Empty,
             IsActive = step.IsActive,
             CreatedAt = step.CreatedAt,
