@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@using System.Globalization
 @using System.Text.Json
 @using WorkflowRBC.Blazor.Models
 @using WorkflowRBC.Blazor.Services
@@ -71,24 +72,9 @@
                 <input class="form-control" @bind="InstanceTitle" />
             </label>
 
-            @if (NewInstanceDataType == WorkflowDataTypes.LeaveRequest)
-            {
-                @LeaveRequestForm(LeaveData)
-            }
-            else if (NewInstanceDataType == WorkflowDataTypes.PurchaseRequest)
-            {
-                @PurchaseRequestForm(PurchaseData)
-            }
+            <DynamicProcessDataForm DataType="SelectedStartDataType" Values="NewInstanceValues" />
         </div>
         <div class="action-row">
-            @if (NewInstanceDataType == WorkflowDataTypes.LeaveRequest)
-            {
-                <button class="btn btn-outline-secondary" @onclick="RecalculateLeaveDays">Calculate days</button>
-            }
-            else if (NewInstanceDataType == WorkflowDataTypes.PurchaseRequest)
-            {
-                <button class="btn btn-outline-secondary" @onclick="RecalculatePurchaseTotal">Calculate total</button>
-            }
             <button class="btn btn-success" @onclick="CreateInstanceAsync" disabled="@(!CanCreateInstance)">Start process</button>
         </div>
     </section>
@@ -163,28 +149,11 @@
                 <div>
                     <h3>@DataTypeLabel(SelectedInstanceDataType)</h3>
                     <div class="form-grid edit-grid">
-                        @if (SelectedInstanceDataType == WorkflowDataTypes.LeaveRequest)
-                        {
-                            @LeaveRequestForm(SelectedLeaveData)
-                        }
-                        else if (SelectedInstanceDataType == WorkflowDataTypes.PurchaseRequest)
-                        {
-                            @PurchaseRequestForm(SelectedPurchaseData)
-                        }
-                        else
-                        {
-                            <p class="muted span-2">Select an instance with supported data to edit it.</p>
-                        }
+                        <DynamicProcessDataForm DataType="SelectedInstanceDataTypeMetadata"
+                                                Values="SelectedInstanceValues"
+                                                ReadOnly="@(!CanEditSelectedData)" />
                     </div>
                     <div class="action-row">
-                        @if (SelectedInstanceDataType == WorkflowDataTypes.LeaveRequest)
-                        {
-                            <button class="btn btn-outline-secondary" @onclick="RecalculateSelectedLeaveDays">Calculate days</button>
-                        }
-                        else if (SelectedInstanceDataType == WorkflowDataTypes.PurchaseRequest)
-                        {
-                            <button class="btn btn-outline-secondary" @onclick="RecalculateSelectedPurchaseTotal">Calculate total</button>
-                        }
                         <button class="btn btn-primary" @onclick="SaveSelectedDataAsync" disabled="@(!CanUpdateSelectedData)">Update data</button>
                     </div>
                 </div>
@@ -253,10 +222,8 @@
     private List<ProcessDto> Processes { get; set; } = new();
     private List<ProcessInstanceDto> Instances { get; set; } = new();
     private ProcessInstanceDto? SelectedInstance { get; set; }
-    private LeaveRequestDataDto LeaveData { get; set; } = NewLeaveData();
-    private PurchaseRequestDataDto PurchaseData { get; set; } = NewPurchaseData();
-    private LeaveRequestDataDto SelectedLeaveData { get; set; } = NewLeaveData();
-    private PurchaseRequestDataDto SelectedPurchaseData { get; set; } = NewPurchaseData();
+    private Dictionary<string, object?> NewInstanceValues { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, object?> SelectedInstanceValues { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     private ProcessDto? SelectedProcess => Processes.FirstOrDefault(p => p.Id == SelectedProcessId);
     private ProcessDto? SelectedProcessForInstance => SelectedInstance is null
@@ -285,6 +252,10 @@
     private string InstanceTitle { get; set; } = "Annual leave request";
     private string NewInstanceDataType => StartDataType;
     private string SelectedInstanceDataType { get; set; } = WorkflowDataTypes.LeaveRequest;
+    private ProcessDataTypeDto? SelectedStartDataType =>
+        StartAllowedDataTypes.FirstOrDefault(t => t.Code.Equals(StartDataType, StringComparison.OrdinalIgnoreCase));
+    private ProcessDataTypeDto? SelectedInstanceDataTypeMetadata =>
+        ProcessDataTypes.FirstOrDefault(t => t.Code.Equals(SelectedInstanceDataType, StringComparison.OrdinalIgnoreCase));
     private int UserId { get; set; } = 1001;
     private int SelectedProcessId { get; set; }
     private int SelectedInstanceId { get; set; }
@@ -298,101 +269,30 @@
         SelectedProcessId == 0 ||
         IsLoadingStartDataTypes ||
         StartAllowedDataTypes.Count == 0;
+    private ProcessStepDto? ActiveProcessStep =>
+        SelectedInstance is null || SelectedProcessForInstance is null
+            ? null
+            : SelectedProcessForInstance.Steps.FirstOrDefault(step =>
+                step.Id == SelectedInstance.Steps.FirstOrDefault(instanceStep =>
+                    instanceStep.State == ProcessInstanceStepState.Active)?.ProcessStepId);
 
     private bool CanCreateInstance =>
         !IsBusy &&
         SelectedProcess is not null &&
         !string.IsNullOrWhiteSpace(StartDataType) &&
-        StartAllowedDataTypes.Any(t => t.Code.Equals(StartDataType, StringComparison.OrdinalIgnoreCase)) &&
+        SelectedStartDataType is not null &&
         !string.IsNullOrWhiteSpace(InstanceTitle);
     private bool CanExecuteAction =>
         !IsBusy &&
         SelectedInstanceId > 0 &&
         AvailableActionsForSelectedInstance.Any() &&
         !string.IsNullOrWhiteSpace(StepComment);
-    private bool CanUpdateSelectedData => !IsBusy && SelectedInstance is not null && IsSupportedDataType(SelectedInstanceDataType);
-
-    private RenderFragment LeaveRequestForm(LeaveRequestDataDto model) => @<text>
-        <label>
-            Leave type
-            <input class="form-control" @bind="model.LeaveType" />
-        </label>
-        <label>
-            Backup person id
-            <input class="form-control" type="number" @bind="model.BackupPersonId" />
-        </label>
-        <label>
-            Start date
-            <input class="form-control" type="date" @bind="model.StartDate" @bind:format="yyyy-MM-dd" />
-        </label>
-        <label>
-            End date
-            <input class="form-control" type="date" @bind="model.EndDate" @bind:format="yyyy-MM-dd" />
-        </label>
-        <label>
-            Total days
-            <input class="form-control" type="number" @bind="model.TotalDays" />
-        </label>
-        <label class="check-line">
-            <input class="form-check-input" type="checkbox" @bind="model.IsEmergency" />
-            Emergency
-        </label>
-        <label class="span-2">
-            Contact during leave
-            <input class="form-control" @bind="model.ContactDuringLeave" />
-        </label>
-        <label class="span-2">
-            Reason
-            <textarea class="form-control" rows="3" @bind="model.Reason"></textarea>
-        </label>
-    </text>;
-
-    private RenderFragment PurchaseRequestForm(PurchaseRequestDataDto model) => @<text>
-        <label class="span-2">
-            Item description
-            <input class="form-control" @bind="model.ItemDescription" />
-        </label>
-        <label>
-            Category
-            <input class="form-control" @bind="model.Category" />
-        </label>
-        <label>
-            Budget code
-            <input class="form-control" @bind="model.BudgetCode" />
-        </label>
-        <label>
-            Quantity
-            <input class="form-control" type="number" @bind="model.Quantity" />
-        </label>
-        <label>
-            Unit price
-            <input class="form-control" type="number" step="0.01" @bind="model.UnitPrice" />
-        </label>
-        <label>
-            Total amount
-            <input class="form-control" type="number" step="0.01" @bind="model.TotalAmount" />
-        </label>
-        <label>
-            Required by
-            <input class="form-control" type="date" @bind="model.RequiredByDate" @bind:format="yyyy-MM-dd" />
-        </label>
-        <label>
-            Vendor name
-            <input class="form-control" @bind="model.VendorName" />
-        </label>
-        <label>
-            Vendor contact
-            <input class="form-control" @bind="model.VendorContact" />
-        </label>
-        <label class="check-line">
-            <input class="form-check-input" type="checkbox" @bind="model.IsUrgent" />
-            Urgent
-        </label>
-        <label class="span-2">
-            Justification
-            <textarea class="form-control" rows="3" @bind="model.Justification"></textarea>
-        </label>
-    </text>;
+    private bool CanEditSelectedData => ActiveProcessStep?.CanEditData == true;
+    private bool CanUpdateSelectedData =>
+        !IsBusy &&
+        SelectedInstance is not null &&
+        CanEditSelectedData &&
+        SelectedInstanceDataTypeMetadata is not null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -420,7 +320,7 @@
             if (SelectedProcess is null)
                 return "Select a process first.";
 
-            var data = GetNewInstanceData();
+            var data = BuildPayload(SelectedStartDataType, NewInstanceValues);
             var result = await Api.CreateInstanceAsync(new CreateProcessInstanceRequest
             {
                 ProcessCode = SelectedProcess.Code,
@@ -446,12 +346,7 @@
             if (SelectedInstance is null)
                 return "Select an instance first.";
 
-            string? error = SelectedInstanceDataType switch
-            {
-                WorkflowDataTypes.LeaveRequest => await SaveLeaveRequestDataAsync(),
-                WorkflowDataTypes.PurchaseRequest => await SavePurchaseRequestDataAsync(),
-                _ => $"Unsupported data type: {SelectedInstanceDataType}"
-            };
+            var error = await SaveDynamicDataAsync();
 
             if (!string.IsNullOrWhiteSpace(error))
                 return error;
@@ -536,6 +431,7 @@
 
     private async Task LoadStartAllowedDataTypesAsync()
     {
+        var previousDataType = StartDataType;
         StartAllowedDataTypes = new();
 
         if (SelectedProcessId == 0)
@@ -567,6 +463,10 @@
             StartDataType = StartAllowedDataTypes[0].Code;
             ResetNewInstanceData();
         }
+        else if (!previousDataType.Equals(StartDataType, StringComparison.OrdinalIgnoreCase) || NewInstanceValues.Count == 0)
+        {
+            ResetNewInstanceData();
+        }
     }
 
     private async Task LoadSelectedDataAsync(int instanceId)
@@ -579,15 +479,7 @@
         SelectedInstanceDataType = document.RootElement.GetProperty("dataType").GetString()
             ?? WorkflowDataTypes.LeaveRequest;
 
-        switch (SelectedInstanceDataType)
-        {
-            case WorkflowDataTypes.LeaveRequest:
-                SelectedLeaveData = JsonSerializer.Deserialize<LeaveRequestDataDto>(data.Value, JsonOptions) ?? NewLeaveData();
-                break;
-            case WorkflowDataTypes.PurchaseRequest:
-                SelectedPurchaseData = JsonSerializer.Deserialize<PurchaseRequestDataDto>(data.Value, JsonOptions) ?? NewPurchaseData();
-                break;
-        }
+        SelectedInstanceValues = ValuesFromJson(SelectedInstanceDataTypeMetadata, document.RootElement);
     }
 
     private async Task RefreshRawAsync()
@@ -658,41 +550,127 @@
 
     private void ResetNewInstanceData()
     {
-        if (StartDataType == WorkflowDataTypes.LeaveRequest)
+        NewInstanceValues = CreateDefaultValues(SelectedStartDataType);
+        InstanceTitle = SelectedStartDataType is null
+            ? "Workflow request"
+            : $"{SelectedStartDataType.DisplayName} request";
+    }
+
+    private static Dictionary<string, object?> CreateDefaultValues(ProcessDataTypeDto? dataType)
+    {
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (dataType is null)
+            return values;
+
+        foreach (var field in dataType.Fields)
         {
-            LeaveData = NewLeaveData();
-            InstanceTitle = "Annual leave request";
+            values[field.Name] = DefaultValue(field);
         }
-        else if (StartDataType == WorkflowDataTypes.PurchaseRequest)
+
+        return values;
+    }
+
+    private static Dictionary<string, object?> ValuesFromJson(ProcessDataTypeDto? dataType, JsonElement root)
+    {
+        var values = CreateDefaultValues(dataType);
+        if (dataType is null)
+            return values;
+
+        foreach (var field in dataType.Fields)
         {
-            PurchaseData = NewPurchaseData();
-            InstanceTitle = "Purchase request";
+            if (TryGetProperty(root, field.Name, out var value))
+                values[field.Name] = JsonValue(field, value);
         }
+
+        return values;
     }
 
-    private void RecalculateLeaveDays()
+    private static Dictionary<string, object?> BuildPayload(
+        ProcessDataTypeDto? dataType,
+        IReadOnlyDictionary<string, object?> values)
     {
-        LeaveData.TotalDays = CalculateTotalDays(LeaveData.StartDate, LeaveData.EndDate);
+        var payload = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (dataType is null)
+            return payload;
+
+        foreach (var field in dataType.Fields)
+        {
+            values.TryGetValue(field.Name, out var value);
+            payload[field.Name] = ConvertFieldValue(field, value);
+        }
+
+        return payload;
     }
 
-    private void RecalculateSelectedLeaveDays()
+    private static object? DefaultValue(ProcessDataFieldDto field)
     {
-        SelectedLeaveData.TotalDays = CalculateTotalDays(SelectedLeaveData.StartDate, SelectedLeaveData.EndDate);
+        if (field.Type.Equals("boolean", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (field.Type.Equals("number", StringComparison.OrdinalIgnoreCase))
+            return 0;
+
+        if (field.Type.Equals("date", StringComparison.OrdinalIgnoreCase))
+            return DateTime.Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        return string.Empty;
     }
 
-    private void RecalculatePurchaseTotal()
+    private static object? JsonValue(ProcessDataFieldDto field, JsonElement value)
     {
-        PurchaseData.TotalAmount = PurchaseData.Quantity * PurchaseData.UnitPrice;
+        return value.ValueKind switch
+        {
+            JsonValueKind.Null => null,
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number when field.Type.Equals("number", StringComparison.OrdinalIgnoreCase) => value.GetRawText(),
+            JsonValueKind.String => value.GetString(),
+            _ => value.GetRawText()
+        };
     }
 
-    private void RecalculateSelectedPurchaseTotal()
+    private static object? ConvertFieldValue(ProcessDataFieldDto field, object? value)
     {
-        SelectedPurchaseData.TotalAmount = SelectedPurchaseData.Quantity * SelectedPurchaseData.UnitPrice;
+        if (value is null)
+            return field.Required ? DefaultValue(field) : null;
+
+        if (value is JsonElement element)
+            return JsonValue(field, element);
+
+        var text = Convert.ToString(value, CultureInfo.InvariantCulture);
+        if (string.IsNullOrWhiteSpace(text))
+            return field.Required ? DefaultValue(field) : null;
+
+        if (field.Type.Equals("boolean", StringComparison.OrdinalIgnoreCase))
+            return bool.TryParse(text, out var boolValue) && boolValue;
+
+        if (field.Type.Equals("number", StringComparison.OrdinalIgnoreCase))
+        {
+            if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var longValue))
+                return longValue;
+
+            if (decimal.TryParse(text, NumberStyles.Number, CultureInfo.InvariantCulture, out var decimalValue))
+                return decimalValue;
+
+            return 0;
+        }
+
+        return text;
     }
 
-    private static int CalculateTotalDays(DateTime start, DateTime end)
+    private static bool TryGetProperty(JsonElement root, string name, out JsonElement value)
     {
-        return end.Date < start.Date ? 0 : (end.Date - start.Date).Days + 1;
+        foreach (var property in root.EnumerateObject())
+        {
+            if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
     }
 
     private void SetStatus(string message, bool success)
@@ -701,81 +679,15 @@
         StatusCss = success ? "alert-success" : "alert-danger";
     }
 
-    private static LeaveRequestDataDto NewLeaveData()
+    private async Task<string?> SaveDynamicDataAsync()
     {
-        return new LeaveRequestDataDto
-        {
-            LeaveType = "Annual",
-            StartDate = DateTime.Today.AddDays(7),
-            EndDate = DateTime.Today.AddDays(9),
-            TotalDays = 3,
-            Reason = "Family vacation",
-            ContactDuringLeave = "email",
-            BackupPersonId = 1002
-        };
-    }
-
-    private static PurchaseRequestDataDto NewPurchaseData()
-    {
-        return new PurchaseRequestDataDto
-        {
-            ItemDescription = "Laptop docking station",
-            Category = "IT Equipment",
-            Quantity = 2,
-            UnitPrice = 180,
-            TotalAmount = 360,
-            VendorName = "Preferred Vendor",
-            VendorContact = "sales@example.com",
-            Justification = "Required for new hybrid workstations",
-            BudgetCode = "IT-2026",
-            RequiredByDate = DateTime.Today.AddDays(14)
-        };
-    }
-
-    private object GetNewInstanceData()
-    {
-        return NewInstanceDataType switch
-        {
-            WorkflowDataTypes.LeaveRequest => PrepareLeaveData(LeaveData),
-            WorkflowDataTypes.PurchaseRequest => PreparePurchaseData(PurchaseData),
-            _ => LeaveData
-        };
-    }
-
-    private async Task<string?> SaveLeaveRequestDataAsync()
-    {
-        PrepareLeaveData(SelectedLeaveData);
-        var result = await Api.UpdateLeaveRequestDataAsync(SelectedInstance!.Id, SelectedLeaveData, UserId);
-        if (!result.Succeeded || result.Value is null)
+        var payload = BuildPayload(SelectedInstanceDataTypeMetadata, SelectedInstanceValues);
+        var result = await Api.UpdateProcessDataJsonAsync(SelectedInstance!.Id, SelectedInstanceDataType, payload, UserId);
+        if (!result.Succeeded)
             return result.Message;
 
-        SelectedLeaveData = result.Value;
+        SelectedInstanceValues = ValuesFromJson(SelectedInstanceDataTypeMetadata, result.Value);
         return null;
-    }
-
-    private async Task<string?> SavePurchaseRequestDataAsync()
-    {
-        PreparePurchaseData(SelectedPurchaseData);
-        var result = await Api.UpdatePurchaseRequestDataAsync(SelectedInstance!.Id, SelectedPurchaseData, UserId);
-        if (!result.Succeeded || result.Value is null)
-            return result.Message;
-
-        SelectedPurchaseData = result.Value;
-        return null;
-    }
-
-    private LeaveRequestDataDto PrepareLeaveData(LeaveRequestDataDto data)
-    {
-        data.DataType = WorkflowDataTypes.LeaveRequest;
-        data.TotalDays = CalculateTotalDays(data.StartDate, data.EndDate);
-        return data;
-    }
-
-    private PurchaseRequestDataDto PreparePurchaseData(PurchaseRequestDataDto data)
-    {
-        data.DataType = WorkflowDataTypes.PurchaseRequest;
-        data.TotalAmount = data.Quantity * data.UnitPrice;
-        return data;
     }
 
     private string DataTypeLabel(string dataType)

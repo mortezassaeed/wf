@@ -101,6 +101,11 @@ public sealed class WorkflowApiClient
         return await SendAsync<T>(() => _httpClient.PutAsJsonAsync($"api/ProcessInstances/{instanceId}/data", request));
     }
 
+    public async Task<ApiResult<JsonElement>> UpdateProcessDataJsonAsync(int instanceId, string dataType, object data, int userId)
+    {
+        return await UpdateProcessDataAsync<JsonElement>(instanceId, dataType, data, userId);
+    }
+
     public async Task<ApiResult<ProcessInstanceDto>> ExecuteActionAsync(int instanceId, WorkflowAction action, string comments, int userId)
     {
         var request = new ExecuteActionRequest

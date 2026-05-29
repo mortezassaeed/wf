@@ -1,0 +1,149 @@
+@using System.Globalization
+@using System.Text.Json
+@using WorkflowRBC.Blazor.Models
+
+@if (DataType is null)
+{
+    <p class="muted span-2">Select a process data type.</p>
+}
+else if (DataType.Fields.Count == 0)
+{
+    <p class="muted span-2">This data type has no editable fields.</p>
+}
+else
+{
+    @foreach (var field in DataType.Fields.OrderBy(f => f.Order).ThenBy(f => f.DisplayName))
+    {
+        <label class="@(IsWideField(field) ? "span-2" : null)">
+            @field.DisplayName
+            @if (IsBoolean(field))
+            {
+                <input class="form-check-input"
+                       type="checkbox"
+                       checked="@GetBool(field)"
+                       disabled="@ReadOnly"
+                       @onchange="value => SetBool(field, value)" />
+            }
+            else if (IsTextArea(field))
+            {
+                <textarea class="form-control"
+                          rows="3"
+                          maxlength="@field.MaxLength"
+                          placeholder="@field.Placeholder"
+                          disabled="@ReadOnly"
+                          value="@GetString(field)"
+                          @onchange="value => SetValue(field, value.Value?.ToString())"></textarea>
+            }
+            else if (field.Options.Count > 0)
+            {
+                <select class="form-select"
+                        disabled="@ReadOnly"
+                        value="@GetString(field)"
+                        @onchange="value => SetValue(field, value.Value?.ToString())">
+                    <option value="">Select @field.DisplayName</option>
+                    @foreach (var option in field.Options)
+                    {
+                        <option value="@option">@option</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <input class="form-control"
+                       type="@InputType(field)"
+                       step="@Step(field)"
+                       maxlength="@field.MaxLength"
+                       min="@field.Minimum"
+                       max="@field.Maximum"
+                       placeholder="@field.Placeholder"
+                       disabled="@ReadOnly"
+                       value="@GetString(field)"
+                       @onchange="value => SetValue(field, value.Value?.ToString())" />
+            }
+            @if (!string.IsNullOrWhiteSpace(field.HelpText))
+            {
+                <small class="muted">@field.HelpText</small>
+            }
+        </label>
+    }
+}
+
+@code {
+    [Parameter] public ProcessDataTypeDto? DataType { get; set; }
+    [Parameter] public Dictionary<string, object?> Values { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    [Parameter] public bool ReadOnly { get; set; }
+
+    private static bool IsBoolean(ProcessDataFieldDto field) =>
+        field.Type.Equals("boolean", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsTextArea(ProcessDataFieldDto field) =>
+        field.ControlType?.Equals("textarea", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static bool IsWideField(ProcessDataFieldDto field) =>
+        IsTextArea(field) || (field.MaxLength ?? 0) > 100;
+
+    private static string InputType(ProcessDataFieldDto field)
+    {
+        if (field.ControlType?.Equals("date", StringComparison.OrdinalIgnoreCase) == true ||
+            field.Type.Equals("date", StringComparison.OrdinalIgnoreCase))
+            return "date";
+
+        if (field.Type.Equals("number", StringComparison.OrdinalIgnoreCase))
+            return "number";
+
+        return "text";
+    }
+
+    private static string? Step(ProcessDataFieldDto field) =>
+        field.Type.Equals("number", StringComparison.OrdinalIgnoreCase) ? "any" : null;
+
+    private string GetString(ProcessDataFieldDto field)
+    {
+        if (!Values.TryGetValue(field.Name, out var value) || value is null)
+            return string.Empty;
+
+        return value switch
+        {
+            DateTime date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            DateOnly date => date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            JsonElement element => ElementToString(element),
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+        };
+    }
+
+    private bool GetBool(ProcessDataFieldDto field)
+    {
+        if (!Values.TryGetValue(field.Name, out var value) || value is null)
+            return false;
+
+        return value switch
+        {
+            bool boolValue => boolValue,
+            JsonElement element when element.ValueKind is JsonValueKind.True => true,
+            JsonElement element when element.ValueKind is JsonValueKind.False => false,
+            _ => bool.TryParse(Convert.ToString(value, CultureInfo.InvariantCulture), out var result) && result
+        };
+    }
+
+    private void SetBool(ProcessDataFieldDto field, ChangeEventArgs args)
+    {
+        Values[field.Name] = args.Value is bool value && value;
+    }
+
+    private void SetValue(ProcessDataFieldDto field, string? value)
+    {
+        Values[field.Name] = string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static string ElementToString(JsonElement element)
+    {
+        return element.ValueKind switch
+        {
+            JsonValueKind.String => element.GetString() ?? string.Empty,
+            JsonValueKind.Number => element.GetRawText(),
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            _ => element.GetRawText()
+        };
+    }
+}
