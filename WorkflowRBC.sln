@@ -11,6 +11,11 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Services", "Services\Servic
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WorkflowRBC.Blazor", "WorkflowRBC.Blazor\WorkflowRBC.Blazor.csproj", "{DC7B22D0-8CDF-4EA7-8342-9803852D6F4E}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{67A95DFA-D4B8-493D-8419-8DEAE71C4094}"
+	ProjectSection(SolutionItems) = preProject
+		docs\process-instance-data-types.md = docs\process-instance-data-types.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
