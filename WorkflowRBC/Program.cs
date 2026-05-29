@@ -19,6 +19,8 @@ builder.Services.AddScoped(typeof(IRepository<>), typeof(Repository<>));
 // Register specific repositories
 builder.Services.AddScoped<IProcessRepository, ProcessRepository>();
 builder.Services.AddScoped<IProcessInstanceRepository, ProcessInstanceRepository>();
+builder.Services.AddScoped<IProcessDataHandler, LeaveRequestDataHandler>();
+builder.Services.AddScoped<IProcessDataHandler, PurchaseRequestDataHandler>();
 builder.Services.AddScoped<IProcessInstanceDataService, ProcessInstanceDataService>();
 builder.Services.AddSingleton<IProcessDataTypeProvider, ProcessDataTypeProvider>();
 

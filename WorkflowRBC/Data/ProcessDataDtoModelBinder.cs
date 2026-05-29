@@ -16,13 +16,14 @@ public class ProcessDataDtoModelBinder : IModelBinder
         var dataType = root.GetProperty("dataType").GetString()
             ?? throw new InvalidOperationException("dataType is required.");
         var dataJson = root.GetProperty("data").GetRawText();
+        var dataService = bindingContext.HttpContext.RequestServices.GetRequiredService<IProcessInstanceDataService>();
 
         var dto = new CreateProcessInstanceDto
         {
             ProcessCode = root.GetProperty("processCode").GetString()
                 ?? throw new InvalidOperationException("processCode is required."),
             Title = root.GetProperty("title").GetString()!,
-            Data = ProcessInstanceDataMapper.Deserialize(dataType, dataJson)
+            Data = dataService.Deserialize(dataType, dataJson)
         };
 
         bindingContext.Result = ModelBindingResult.Success(dto);

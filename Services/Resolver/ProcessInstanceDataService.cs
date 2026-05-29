@@ -7,14 +7,17 @@ namespace Services.Resolver;
 public class ProcessInstanceDataService : IProcessInstanceDataService
 {
     private readonly WorkflowDbContext _context;
-    public ProcessInstanceDataService(WorkflowDbContext context)
+    private readonly IReadOnlyDictionary<string, IProcessDataHandler> _handlers;
+
+    public ProcessInstanceDataService(WorkflowDbContext context, IEnumerable<IProcessDataHandler> handlers)
     {
         _context = context;
+        _handlers = handlers.ToDictionary(h => h.DataType, StringComparer.OrdinalIgnoreCase);
     }
 
     public IProcessDataDto Deserialize(string dataType, string dataJson)
     {
-        return ProcessInstanceDataMapper.Deserialize(dataType, dataJson);
+        return GetHandler(dataType).Deserialize(dataJson);
     }
 
     public ProcessInstanceDataBase? CreateEntity(IProcessDataDto? dto, int userId)
@@ -22,38 +25,9 @@ public class ProcessInstanceDataService : IProcessInstanceDataService
         if (dto == null)
             return null;
 
-        ProcessInstanceDataBase entity = dto switch
-        {
-            LeaveRequestDto leave => new LeaveRequestData
-            {
-                LeaveType = leave.LeaveType,
-                StartDate = leave.StartDate,
-                EndDate = leave.EndDate,
-                TotalDays = leave.TotalDays,
-                Reason = leave.Reason,
-                ContactDuringLeave = leave.ContactDuringLeave,
-                IsEmergency = leave.IsEmergency,
-                BackupPersonId = leave.BackupPersonId
-            },
-            PurchaseRequestDto purchase => new PurchaseRequestData
-            {
-                ItemDescription = purchase.ItemDescription,
-                Category = purchase.Category,
-                Quantity = purchase.Quantity,
-                UnitPrice = purchase.UnitPrice,
-                TotalAmount = purchase.TotalAmount,
-                VendorName = purchase.VendorName,
-                VendorContact = purchase.VendorContact,
-                Justification = purchase.Justification,
-                BudgetCode = purchase.BudgetCode,
-                RequiredByDate = purchase.RequiredByDate,
-                IsUrgent = purchase.IsUrgent
-            },
-            _ => throw new InvalidOperationException($"Unknown data type: {dto.DataType}")
-        };
+        var entity = GetHandler(dto.DataType).CreateEntity(dto);
 
         SetCommonFields(entity, dto.DataType, userId, isNew: true);
-        ApplyRequiredStringDefaults(entity);
         return entity;
     }
 
@@ -66,28 +40,19 @@ public class ProcessInstanceDataService : IProcessInstanceDataService
         if (data == null)
             return null;
 
-        return data.DataType switch
-        {
-            "LEAVE_REQUEST" => ToDto(await _context.LeaveRequestData
-                .AsNoTracking()
-                .FirstOrDefaultAsync(d => d.ProcessInstanceId == processInstanceId)),
-            "PURCHASE_REQUEST" => ToDto(await _context.PurchaseRequestData
-                .AsNoTracking()
-                .FirstOrDefaultAsync(d => d.ProcessInstanceId == processInstanceId)),
-            _ => null
-        };
+        return GetHandler(data.DataType).ToDto(data);
     }
 
-    public async Task<IProcessDataDto> UpsertAsync(int processInstanceId, IProcessDataDto dto, int userId)
+    public async Task<IProcessDataDto> UpdateAsync(int processInstanceId, IProcessDataDto dto, int userId)
     {
         var existing = await _context.ProcessInstanceDataBase
             .FirstOrDefaultAsync(d => d.ProcessInstanceId == processInstanceId);
 
-        if (existing != null)
-        {
-            _context.ProcessInstanceDataBase.Remove(existing);
-            await _context.SaveChangesAsync();
-        }
+        if (existing == null)
+            throw new InvalidOperationException($"No data found for process instance {processInstanceId}.");
+
+        _context.ProcessInstanceDataBase.Remove(existing);
+        await _context.SaveChangesAsync();
 
         var entity = CreateEntity(dto, userId)
             ?? throw new InvalidOperationException("Process instance data is required.");
@@ -100,45 +65,12 @@ public class ProcessInstanceDataService : IProcessInstanceDataService
             ?? throw new InvalidOperationException("Process instance data was saved but could not be loaded.");
     }
 
-    private static ProcessInstanceDataBaseDto? ToDto(ProcessInstanceDataBase? entity)
+    private IProcessDataHandler GetHandler(string dataType)
     {
-        return entity switch
-        {
-            LeaveRequestData leave => new LeaveRequestDto
-            {
-                Id = leave.Id,
-                ProcessInstanceId = leave.ProcessInstanceId,
-                CreatedAt = leave.CreatedAt,
-                UpdatedAt = leave.UpdatedAt,
-                LeaveType = leave.LeaveType,
-                StartDate = leave.StartDate,
-                EndDate = leave.EndDate,
-                TotalDays = leave.TotalDays,
-                Reason = leave.Reason,
-                ContactDuringLeave = leave.ContactDuringLeave,
-                IsEmergency = leave.IsEmergency,
-                BackupPersonId = leave.BackupPersonId
-            },
-            PurchaseRequestData purchase => new PurchaseRequestDto
-            {
-                Id = purchase.Id,
-                ProcessInstanceId = purchase.ProcessInstanceId,
-                CreatedAt = purchase.CreatedAt,
-                UpdatedAt = purchase.UpdatedAt,
-                ItemDescription = purchase.ItemDescription,
-                Category = purchase.Category,
-                Quantity = purchase.Quantity,
-                UnitPrice = purchase.UnitPrice,
-                TotalAmount = purchase.TotalAmount,
-                VendorName = purchase.VendorName,
-                VendorContact = purchase.VendorContact,
-                Justification = purchase.Justification,
-                BudgetCode = purchase.BudgetCode,
-                RequiredByDate = purchase.RequiredByDate,
-                IsUrgent = purchase.IsUrgent
-            },
-            _ => null
-        };
+        if (_handlers.TryGetValue(dataType, out var handler))
+            return handler;
+
+        throw new NotSupportedException($"Unknown data type: {dataType}");
     }
 
     private static void SetCommonFields(ProcessInstanceDataBase entity, string dataType, int userId, bool isNew)
@@ -154,26 +86,6 @@ public class ProcessInstanceDataService : IProcessInstanceDataService
         {
             entity.UpdatedAt = DateTime.UtcNow;
             entity.UpdatedByUserId = userId;
-        }
-    }
-
-    private static void ApplyRequiredStringDefaults(ProcessInstanceDataBase entity)
-    {
-        switch (entity)
-        {
-            case LeaveRequestData leave:
-                leave.LeaveType ??= string.Empty;
-                leave.Reason ??= string.Empty;
-                leave.ContactDuringLeave ??= string.Empty;
-                break;
-            case PurchaseRequestData purchase:
-                purchase.ItemDescription ??= string.Empty;
-                purchase.Category ??= string.Empty;
-                purchase.VendorName ??= string.Empty;
-                purchase.VendorContact ??= string.Empty;
-                purchase.Justification ??= string.Empty;
-                purchase.BudgetCode ??= string.Empty;
-                break;
         }
     }
 }

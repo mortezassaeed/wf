@@ -35,7 +35,7 @@ public class ProcessInstanceDataController : ControllerBase
     }
 
     [HttpPut]
-    public async Task<ActionResult<IProcessDataDto>> UpsertData(
+    public async Task<ActionResult<IProcessDataDto>> UpdateData(
         int processInstanceId,
         [FromBody] ProcessInstanceDataRequestDto request)
     {
@@ -53,7 +53,15 @@ public class ProcessInstanceDataController : ControllerBase
             return BadRequest(new { ex.Message });
         }
 
-        var data = await _dataService.UpsertAsync(processInstanceId, dto, request.UserId);
+        IProcessDataDto data;
+        try
+        {
+            data = await _dataService.UpdateAsync(processInstanceId, dto, request.UserId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return NotFound(new { ex.Message });
+        }
 
         return Ok(data);
     }
