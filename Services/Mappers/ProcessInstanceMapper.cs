@@ -74,4 +74,24 @@ public static class ProcessInstanceMapper
             ToState = history.ToState
         };
     }
+
+    public static CartableItemDto ToCartableItemDto(ProcessInstanceStep step)
+    {
+        return new CartableItemDto
+        {
+            ProcessInstanceId = step.ProcessInstanceId,
+            ProcessCode = step.ProcessInstance?.Process?.Code ?? string.Empty,
+            ProcessName = step.ProcessInstance?.Process?.Name ?? string.Empty,
+            Title = step.ProcessInstance?.Title ?? string.Empty,
+            InstanceState = step.ProcessInstance?.State ?? default,
+            ProcessInstanceStepId = step.Id,
+            ProcessStepId = step.ProcessStepId,
+            StepCode = step.ProcessStep?.Code ?? string.Empty,
+            StepName = step.ProcessStep?.Name ?? string.Empty,
+            StepState = step.State,
+            AssignedToUserId = step.AssignedToUserId,
+            StartedAt = step.StartedAt,
+            CreatedAt = step.CreatedAt
+        };
+    }
 }

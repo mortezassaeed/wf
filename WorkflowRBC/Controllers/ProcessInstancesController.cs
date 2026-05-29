@@ -4,8 +4,10 @@ using DataAccess.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Services;
 using Services.Dtos;
+using Services.Factories;
 using Services.Mappers;
 using Services.Resolver;
+using Services.Workflow;
 
 namespace WorkflowEngine.Controllers;
 
@@ -122,7 +124,7 @@ public class ProcessInstancesController : ControllerBase
     {
         var currentUserId = userId ?? LoggedInUserId;
         var steps = await _instanceRepository.GetPendingStepsByUserAsync(currentUserId);
-        var dtos = steps.Select(ToCartableItemDto);
+        var dtos = steps.Select(ProcessInstanceMapper.ToCartableItemDto);
         return Ok(dtos);
     }
 
@@ -151,27 +153,10 @@ public class ProcessInstancesController : ControllerBase
             return BadRequest(new { Message = "Process has no start step defined" });
 
         var instanceData = _dataService.CreateEntity(dto.Data, LoggedInUserId);
-        var instance = new ProcessInstance
-        {
-            ProcessId = process.Id,
-            CreatedByUserId = LoggedInUserId,
-            Title = dto.Title,
-            State = ProcessInstanceState.Open,
-            CreatedAt = DateTime.UtcNow,
-            Data = instanceData,
-            ProcessInstanceSteps = new List<ProcessInstanceStep>
-            {
-                new ProcessInstanceStep
-                {
-                    ProcessStepId = startStep.Id,
-                    State = ProcessInstanceStepState.Active,
-                    AssignedToUserId = LoggedInUserId,
-                    StartedAt = DateTime.UtcNow,
-                    CreatedAt = DateTime.UtcNow,
-                    Comments = string.Empty,
-                }
-            }
-        };
+        if (instanceData == null)
+            return BadRequest(new { Message = "Process instance data is required" });
+
+        var instance = ProcessInstanceFactory.CreateInstance(process, startStep, instanceData, dto.Title, LoggedInUserId);
 
         await _instanceRepository.AddAsync(instance);
         return CreatedAtAction(nameof(GetById), new { id = instance.Id }, ProcessInstanceMapper.ToDetailDto(instance, dto.Data));
@@ -220,19 +205,18 @@ public class ProcessInstancesController : ControllerBase
             return BadRequest(new { Message = $"Next step with ID {stepAction.ToStepId} was not found or is inactive" });
 
         var fromState = instance.State;
-        var toState = nextStep.IsEnd ? ProcessInstanceState.Completed : DetermineNewState((WorkflowAction)workflowAction, instance.State);
+        var toState = nextStep.IsEnd
+            ? ProcessInstanceState.Completed
+            : WorkflowStateResolver.DetermineNewState((WorkflowAction)workflowAction, instance.State);
 
-        var history = new ProcessInstanceHistory
-        {
-            ProcessInstanceId = id,
-            ProcessStepId = currentStep.ProcessStepId,
-            Action = (WorkflowAction)workflowAction,
-            PerformedByUserId = dto?.PerformedByUserId ?? instance.CreatedByUserId,
-            Comments = comments,
-            PerformedAt = DateTime.UtcNow,
-            FromState = fromState.ToString(),
-            ToState = toState.ToString()
-        };
+        var history = ProcessInstanceFactory.CreateHistory(
+            id,
+            currentStep,
+            (WorkflowAction)workflowAction,
+            dto?.PerformedByUserId ?? instance.CreatedByUserId,
+            comments,
+            fromState,
+            toState);
 
         currentStep.State = ProcessInstanceStepState.Completed;
         currentStep.CompletedAt = DateTime.UtcNow;
@@ -245,16 +229,7 @@ public class ProcessInstancesController : ControllerBase
 
         if (!nextStep.IsEnd)
         {
-            var nextInstanceStep = new ProcessInstanceStep
-            {
-                ProcessInstanceId = id,
-                ProcessStepId = nextStep.Id,
-                State = ProcessInstanceStepState.Active,
-                AssignedToUserId = instance.CreatedByUserId,
-                StartedAt = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
-                Comments = string.Empty
-            };
+            var nextInstanceStep = ProcessInstanceFactory.CreateActiveStep(id, nextStep.Id, instance.CreatedByUserId);
 
             await _instanceStepRepository.AddAsync(nextInstanceStep);
         }
@@ -291,41 +266,6 @@ public class ProcessInstancesController : ControllerBase
 
         await _instanceRepository.DeleteAsync(instance.Id);
         return NoContent();
-    }
-
-    private static ProcessInstanceState DetermineNewState(WorkflowAction action, ProcessInstanceState currentState)
-    {
-        return action switch
-        {
-            WorkflowAction.Submit => ProcessInstanceState.InProgress,
-            WorkflowAction.Approve => ProcessInstanceState.InProgress,
-            WorkflowAction.Complete => ProcessInstanceState.Completed,
-            WorkflowAction.Reject => ProcessInstanceState.Rejected,
-            WorkflowAction.Cancel => ProcessInstanceState.Cancelled,
-            WorkflowAction.RequestMoreInfo => ProcessInstanceState.OnHold,
-            WorkflowAction.ProvideInfo => ProcessInstanceState.InProgress,
-            _ => currentState
-        };
-    }
-
-    private static CartableItemDto ToCartableItemDto(ProcessInstanceStep step)
-    {
-        return new CartableItemDto
-        {
-            ProcessInstanceId = step.ProcessInstanceId,
-            ProcessCode = step.ProcessInstance?.Process?.Code ?? string.Empty,
-            ProcessName = step.ProcessInstance?.Process?.Name ?? string.Empty,
-            Title = step.ProcessInstance?.Title ?? string.Empty,
-            InstanceState = step.ProcessInstance?.State ?? default,
-            ProcessInstanceStepId = step.Id,
-            ProcessStepId = step.ProcessStepId,
-            StepCode = step.ProcessStep?.Code ?? string.Empty,
-            StepName = step.ProcessStep?.Name ?? string.Empty,
-            StepState = step.State,
-            AssignedToUserId = step.AssignedToUserId,
-            StartedAt = step.StartedAt,
-            CreatedAt = step.CreatedAt
-        };
     }
 
 }

@@ -3,6 +3,7 @@ using DataAccess.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Services;
 using Services.Dtos;
+using Services.Factories;
 using Services.Mappers;
 using Services.Resolver;
 
@@ -112,33 +113,17 @@ public class ProcessesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<ProcessDto>> Create([FromBody] CreateProcessDto dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.Code))
+            return BadRequest(new { Message = "Process code is required." });
+
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return BadRequest(new { Message = "Process name is required." });
+
         var validationError = ValidateAllowedDataTypes(dto.AllowedDataTypes);
         if (validationError != null)
             return BadRequest(new { Message = validationError });
 
-        var process = new Process
-        {
-            Code = dto.Code,
-            Name = dto.Name,
-            Description = dto.Description,
-            IsActive = dto.IsActive,
-            CreatedAt = DateTime.UtcNow,
-            ProcessAllowedDataTypes = BuildAllowedDataTypes(dto.AllowedDataTypes),
-            ProcessSteps = dto.Steps?.Select(s => new ProcessStep
-            {
-                Code = s.Code,
-                Name = s.Name,
-                Description = s.Description ?? string.Empty,
-                Order = s.Order,
-                IsStart = s.IsStart,
-                IsEnd = s.IsEnd,
-                RequiresApproval = s.RequiresApproval,
-                ApproverRoles = s.ApproverRoles ?? string.Empty,
-                IsActive = s.IsActive,
-                CreatedAt = DateTime.UtcNow,
-               
-            }).ToList()
-        };
+        var process = ProcessFactory.CreateProcess(dto, NormalizeDataTypes(dto.AllowedDataTypes));
 
         await _processRepository.AddAsync(process);
         return CreatedAtAction(nameof(GetById), new { id = process.Id }, ProcessMapper.ToDto(process));
@@ -184,13 +169,6 @@ public class ProcessesController : ControllerBase
 
         var invalidDataType = selectedDataTypes.FirstOrDefault(dataType => !_dataTypeProvider.Exists(dataType));
         return invalidDataType == null ? null : $"Unknown process data type: {invalidDataType}";
-    }
-
-    private static List<ProcessAllowedDataType> BuildAllowedDataTypes(IEnumerable<string> dataTypes)
-    {
-        return NormalizeDataTypes(dataTypes)
-            .Select(dataType => new ProcessAllowedDataType { DataType = dataType })
-            .ToList();
     }
 
     private static void SetAllowedDataTypes(Process process, IEnumerable<string> dataTypes)
@@ -261,27 +239,7 @@ public class ProcessStepsController : ControllerBase
         if (process == null)
             return NotFound(new { Message = $"Process with ID {processId} not found" });
 
-        var step = new ProcessStep
-        {
-            ProcessId = processId,
-            Code = dto.Code,
-            Name = dto.Name,
-            Description = dto.Description ?? string.Empty,
-            Order = dto.Order,
-            IsStart = dto.IsStart,
-            IsEnd = dto.IsEnd,
-            RequiresApproval = dto.RequiresApproval,
-            ApproverRoles = dto.ApproverRoles ?? string.Empty,
-            IsActive = dto.IsActive,
-            CreatedAt = DateTime.UtcNow
-            //ProcessStepActions = dto.Actions?.Select(a => new ProcessStepAction
-            //{
-            //    Action = a.Action,
-            //    DisplayName = a.DisplayName,
-            //    IsActive = a.IsActive,
-            //    CreatedAt = DateTime.UtcNow
-            //}).ToList()
-        };
+        var step = ProcessFactory.CreateStep(processId, dto);
 
         await _stepRepository.AddAsync(step);
         return CreatedAtAction(nameof(GetStep), new { processId, stepId = step.Id }, ProcessMapper.ToStepDto(step));
@@ -362,16 +320,7 @@ public class ProcessStepActionsController : ControllerBase
         if (!fromStepExists || !toStepExists)
             return BadRequest(new { Message = "FromStepId and ToStepId must both belong to the process" });
 
-        var action = new ProcessStepAction
-        {
-            ProcessId = processId,
-            FromStepId = dto.FromStepId,
-            ToStepId = dto.ToStepId,
-            Action = dto.Action,
-            DisplayName = dto.DisplayName,
-            IsActive = dto.IsActive,
-            CreatedAt = DateTime.UtcNow
-        };
+        var action = ProcessFactory.CreateAction(processId, dto);
 
         await _actionRepository.AddAsync(action);
         return CreatedAtAction(nameof(GetActions), new { processId }, ProcessMapper.ToActionDto(action));
