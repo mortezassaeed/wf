@@ -79,17 +79,17 @@ public sealed class WorkflowApiClient
         return await SendStringAsync(() => _httpClient.GetAsync($"api/ProcessInstances/{instanceId}/data"));
     }
 
-    public async Task<ApiResult<LeaveRequestDataDto>> UpsertLeaveRequestDataAsync(int instanceId, LeaveRequestDataDto data, int userId)
+    public async Task<ApiResult<LeaveRequestDataDto>> UpdateLeaveRequestDataAsync(int instanceId, LeaveRequestDataDto data, int userId)
     {
-        return await UpsertProcessDataAsync<LeaveRequestDataDto>(instanceId, data.DataType, data, userId);
+        return await UpdateProcessDataAsync<LeaveRequestDataDto>(instanceId, data.DataType, data, userId);
     }
 
-    public async Task<ApiResult<PurchaseRequestDataDto>> UpsertPurchaseRequestDataAsync(int instanceId, PurchaseRequestDataDto data, int userId)
+    public async Task<ApiResult<PurchaseRequestDataDto>> UpdatePurchaseRequestDataAsync(int instanceId, PurchaseRequestDataDto data, int userId)
     {
-        return await UpsertProcessDataAsync<PurchaseRequestDataDto>(instanceId, data.DataType, data, userId);
+        return await UpdateProcessDataAsync<PurchaseRequestDataDto>(instanceId, data.DataType, data, userId);
     }
 
-    public async Task<ApiResult<T>> UpsertProcessDataAsync<T>(int instanceId, string dataType, object data, int userId)
+    public async Task<ApiResult<T>> UpdateProcessDataAsync<T>(int instanceId, string dataType, object data, int userId)
     {
         var request = new ProcessInstanceDataRequest
         {

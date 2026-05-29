@@ -745,7 +745,7 @@
     private async Task<string?> SaveLeaveRequestDataAsync()
     {
         PrepareLeaveData(SelectedLeaveData);
-        var result = await Api.UpsertLeaveRequestDataAsync(SelectedInstance!.Id, SelectedLeaveData, UserId);
+        var result = await Api.UpdateLeaveRequestDataAsync(SelectedInstance!.Id, SelectedLeaveData, UserId);
         if (!result.Succeeded || result.Value is null)
             return result.Message;
 
@@ -756,7 +756,7 @@
     private async Task<string?> SavePurchaseRequestDataAsync()
     {
         PreparePurchaseData(SelectedPurchaseData);
-        var result = await Api.UpsertPurchaseRequestDataAsync(SelectedInstance!.Id, SelectedPurchaseData, UserId);
+        var result = await Api.UpdatePurchaseRequestDataAsync(SelectedInstance!.Id, SelectedPurchaseData, UserId);
         if (!result.Succeeded || result.Value is null)
             return result.Message;
 

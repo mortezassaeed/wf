@@ -345,31 +345,42 @@
 
             SelectedProcess = processResult.Value;
             StepComment = "";
-            await LoadSelectedDataAsync(SelectedInstance.Id);
+            LoadSelectedData(SelectedInstance);
             SyncSelectedAction();
             return null;
         });
     }
 
-    private async Task LoadSelectedDataAsync(int instanceId)
+    private void LoadSelectedData(ProcessInstanceDto instance)
     {
-        var data = await Api.GetInstanceDataJsonAsync(instanceId);
-        if (!data.Succeeded || string.IsNullOrWhiteSpace(data.Value))
+        var dataJson = GetDataJson(instance.Data);
+        if (string.IsNullOrWhiteSpace(dataJson))
             return;
 
-        using var document = JsonDocument.Parse(data.Value);
+        using var document = JsonDocument.Parse(dataJson);
         SelectedInstanceDataType = document.RootElement.GetProperty("dataType").GetString()
             ?? WorkflowDataTypes.LeaveRequest;
 
         switch (SelectedInstanceDataType)
         {
             case WorkflowDataTypes.LeaveRequest:
-                SelectedLeaveData = JsonSerializer.Deserialize<LeaveRequestDataDto>(data.Value, JsonOptions) ?? NewLeaveData();
+                SelectedLeaveData = JsonSerializer.Deserialize<LeaveRequestDataDto>(dataJson, JsonOptions) ?? NewLeaveData();
                 break;
             case WorkflowDataTypes.PurchaseRequest:
-                SelectedPurchaseData = JsonSerializer.Deserialize<PurchaseRequestDataDto>(data.Value, JsonOptions) ?? NewPurchaseData();
+                SelectedPurchaseData = JsonSerializer.Deserialize<PurchaseRequestDataDto>(dataJson, JsonOptions) ?? NewPurchaseData();
                 break;
         }
+    }
+
+    private static string? GetDataJson(object? data)
+    {
+        return data switch
+        {
+            null => null,
+            JsonElement element => element.GetRawText(),
+            string value => value,
+            _ => JsonSerializer.Serialize(data, JsonOptions)
+        };
     }
 
     private async Task SaveSelectedDataAsync()
@@ -389,7 +400,6 @@
             if (!string.IsNullOrWhiteSpace(error))
                 return error;
 
-            await LoadSelectedDataAsync(SelectedInstance.Id);
             return null;
         });
     }
@@ -407,7 +417,7 @@
 
             SelectedInstance = result.Value;
             StepComment = "";
-            await LoadSelectedDataAsync(result.Value.Id);
+            LoadSelectedData(result.Value);
             SyncSelectedAction();
             await LoadCartableAsync();
             return null;
@@ -417,22 +427,24 @@
     private async Task<string?> SaveLeaveRequestDataAsync()
     {
         PrepareLeaveData(SelectedLeaveData);
-        var result = await Api.UpsertLeaveRequestDataAsync(SelectedInstance!.Id, SelectedLeaveData, UserId);
+        var result = await Api.UpdateLeaveRequestDataAsync(SelectedInstance!.Id, SelectedLeaveData, UserId);
         if (!result.Succeeded || result.Value is null)
             return result.Message;
 
         SelectedLeaveData = result.Value;
+        SelectedInstance!.Data = result.Value;
         return null;
     }
 
     private async Task<string?> SavePurchaseRequestDataAsync()
     {
         PreparePurchaseData(SelectedPurchaseData);
-        var result = await Api.UpsertPurchaseRequestDataAsync(SelectedInstance!.Id, SelectedPurchaseData, UserId);
+        var result = await Api.UpdatePurchaseRequestDataAsync(SelectedInstance!.Id, SelectedPurchaseData, UserId);
         if (!result.Succeeded || result.Value is null)
             return result.Message;
 
         SelectedPurchaseData = result.Value;
+        SelectedInstance!.Data = result.Value;
         return null;
     }
 
