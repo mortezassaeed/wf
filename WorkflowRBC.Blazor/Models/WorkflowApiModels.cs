@@ -91,6 +91,24 @@ public sealed class ProcessDataTypeDto
     public string Code { get; set; } = "";
     public string DisplayName { get; set; } = "";
     public string EntityType { get; set; } = "";
+    public string DtoType { get; set; } = "";
+    public List<ProcessDataFieldDto> Fields { get; set; } = new();
+}
+
+public sealed class ProcessDataFieldDto
+{
+    public string Name { get; set; } = "";
+    public string DisplayName { get; set; } = "";
+    public string Type { get; set; } = "";
+    public bool Required { get; set; }
+    public int? MaxLength { get; set; }
+    public double? Minimum { get; set; }
+    public double? Maximum { get; set; }
+    public string? HelpText { get; set; }
+    public string? Placeholder { get; set; }
+    public string? ControlType { get; set; }
+    public int Order { get; set; }
+    public List<string> Options { get; set; } = new();
 }
 
 public sealed class CreateProcessStepActionDto
